@@ -448,7 +448,10 @@ impl App {
                             SelectedItem::Journal(journal.clone())
                         }
                     });
-                    self.mode = Mode::View;
+                    // Only change mode to View if not in Search mode (navigation in search should keep search mode)
+                    if self.mode != Mode::Search {
+                        self.mode = Mode::View;
+                    }
                     self.item_view_scroll = 0;
                 } else {
                     self.selected_item = None;
@@ -460,8 +463,26 @@ impl App {
             // For non-grouped modes, use direct indexing
             if !items.is_empty() {
                 // Ensure selected_index is valid
+                // BUT: If we have a valid selected_item, try to find its index instead of resetting
                 if self.selected_index >= items.len() {
-                    self.selected_index = 0;
+                    if let Some(ref selected) = self.selected_item {
+                        // Try to find the selected item's index
+                        let found_idx = items.iter().position(|item| {
+                            match (item, selected) {
+                                (Item::Task(t), SelectedItem::Task(st)) => t.id == st.id,
+                                (Item::Note(n), SelectedItem::Note(sn)) => n.id == sn.id,
+                                (Item::Journal(j), SelectedItem::Journal(sj)) => j.id == sj.id,
+                                _ => false,
+                            }
+                        });
+                        if let Some(idx) = found_idx {
+                            self.selected_index = idx;
+                        } else {
+                            self.selected_index = 0;
+                        }
+                    } else {
+                        self.selected_index = 0;
+                    }
                 }
                 
                 if let Some(item) = items.get(self.selected_index) {
@@ -476,7 +497,10 @@ impl App {
                             SelectedItem::Journal(journal.clone())
                         }
                     });
-                    self.mode = Mode::View;
+                    // Only change mode to View if not in Search mode (navigation in search should keep search mode)
+                    if self.mode != Mode::Search {
+                        self.mode = Mode::View;
+                    }
                     // Reset scroll when selecting a new item
                     self.item_view_scroll = 0;
                 }
@@ -502,6 +526,24 @@ impl App {
                 } else {
                     self.selected_index = cmp::min(self.selected_index, display_len.saturating_sub(1));
                 }
+                
+                // Skip headings - find the first non-heading item if current selection is a heading
+                if is_heading[self.selected_index] {
+                    // Find the first non-heading item
+                    let mut found = false;
+                    for i in 0..display_len {
+                        if !is_heading[i] {
+                            self.selected_index = i;
+                            found = true;
+                            break;
+                        }
+                    }
+                    // If no non-heading items exist, clear selection
+                    if !found {
+                        self.selected_index = 0;
+                        self.selected_item = None;
+                    }
+                }
             }
         } else {
             let items = self.get_current_items();
@@ -510,13 +552,49 @@ impl App {
                 self.selected_item = None;
             } else {
                 // Ensure we have a valid selection - if index is out of bounds, select first item
+                // BUT: If we have a valid selected_item, try to find its index instead of resetting
                 if self.selected_index >= items.len() {
-                    self.selected_index = 0;
+                    // If we have a selected_item, try to find its index in the items list
+                    if let Some(ref selected) = self.selected_item {
+                        let found_idx = items.iter().position(|item| {
+                            match (item, selected) {
+                                (Item::Task(t), SelectedItem::Task(st)) => t.id == st.id,
+                                (Item::Note(n), SelectedItem::Note(sn)) => n.id == sn.id,
+                                (Item::Journal(j), SelectedItem::Journal(sj)) => j.id == sj.id,
+                                _ => false,
+                            }
+                        });
+                        if let Some(idx) = found_idx {
+                            self.selected_index = idx;
+                        } else {
+                            // Couldn't find the item, reset to 0
+                            self.selected_index = 0;
+                        }
+                    } else {
+                        self.selected_index = 0;
+                    }
+                } else if self.selected_index == 0 && self.selected_item.is_some() {
+                    // If selected_index is 0 but we have a selected_item, try to find its index
+                    // This handles the case where selected_index was reset to 0 but we have the correct item
+                    if let Some(ref selected) = self.selected_item {
+                        let found_idx = items.iter().position(|item| {
+                            match (item, selected) {
+                                (Item::Task(t), SelectedItem::Task(st)) => t.id == st.id,
+                                (Item::Note(n), SelectedItem::Note(sn)) => n.id == sn.id,
+                                (Item::Journal(j), SelectedItem::Journal(sj)) => j.id == sj.id,
+                                _ => false,
+                            }
+                        });
+                        if let Some(idx) = found_idx {
+                            self.selected_index = idx;
+                        }
+                    }
                 } else {
                     self.selected_index = cmp::min(self.selected_index, items.len().saturating_sub(1));
                 }
             }
         }
+        
         self.sync_list_state();
     }
 
@@ -529,7 +607,7 @@ impl App {
         if self.list_view_mode == ListViewMode::GroupedByTags {
             let (is_heading, _) = self.get_display_index_mapping();
             
-            // Find the previous non-heading item, or stop at the first item
+            // Find the previous non-heading item
             let mut new_index = self.selected_index;
             loop {
                 if new_index == 0 {
@@ -543,12 +621,8 @@ impl App {
                     return;
                 }
             }
-            // If we couldn't find a non-heading item, just move to index 0
-            if self.selected_index > 0 {
-                self.selected_index = 0;
-                self.sync_list_state();
-                self.select_current_item();
-            }
+            // If we couldn't find a non-heading item above, we're already at the top
+            // Don't change selection - stay where we are
         } else {
             if self.selected_index > 0 {
                 self.selected_index -= 1;
@@ -608,6 +682,9 @@ impl App {
             ListViewMode::TwoLine => ListViewMode::GroupedByTags,
             ListViewMode::GroupedByTags => ListViewMode::Simple,
         };
+        // Adjust selection to ensure it's valid for the new mode (skip headings in GroupedByTags)
+        self.adjust_selected_index();
+        self.select_current_item();
     }
 
     /// Switch to a new tab and auto-select the first item if available
@@ -653,9 +730,67 @@ impl App {
     }
 
     pub fn exit_search_mode(&mut self) {
+        // Get selected item ID - prefer using selected_item if available (from navigation),
+        // otherwise use selected_index to look it up from filtered list
+        let selected_item_id = if let Some(ref selected) = self.selected_item {
+            // Use already-selected item if available
+            match selected {
+                SelectedItem::Task(t) => t.id.map(|id| ("Task", id)),
+                SelectedItem::Note(n) => n.id.map(|id| ("Note", id)),
+                SelectedItem::Journal(j) => j.id.map(|id| ("Journal", id)),
+            }
+        } else {
+            // Fall back to looking up by selected_index in filtered list
+            let filtered_items = self.get_current_items();
+            if !filtered_items.is_empty() && self.selected_index < filtered_items.len() {
+                if let Some(item) = filtered_items.get(self.selected_index) {
+                    match item {
+                        Item::Task(t) => t.id.map(|id| ("Task", id)),
+                        Item::Note(n) => n.id.map(|id| ("Note", id)),
+                        Item::Journal(j) => j.id.map(|id| ("Journal", id)),
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+        
         self.mode = Mode::View;
         self.search_query.clear();
-        self.adjust_selected_index();
+        
+        // Map selected_index from filtered list to full list
+        if let Some((item_type, item_id)) = selected_item_id {
+            let full_items = self.get_current_items();
+            let new_item_index = full_items.iter().position(|item| {
+                match (item, item_type) {
+                    (Item::Task(t), "Task") => t.id == Some(item_id),
+                    (Item::Note(n), "Note") => n.id == Some(item_id),
+                    (Item::Journal(j), "Journal") => j.id == Some(item_id),
+                    _ => false,
+                }
+            });
+            
+            if let Some(item_idx) = new_item_index {
+                if self.list_view_mode == ListViewMode::GroupedByTags {
+                    // In GroupedByTags mode, we need to find the display index that corresponds to this item index
+                    let (_, item_indices) = self.get_display_index_mapping();
+                    if let Some(display_idx) = item_indices.iter().position(|&idx_opt| idx_opt == Some(item_idx)) {
+                        self.selected_index = display_idx;
+                    } else {
+                        // Fallback: set to 0 if we can't find the display index
+                        self.selected_index = 0;
+                    }
+                } else {
+                    // For non-grouped modes, item index is the same as display index
+                    self.selected_index = item_idx;
+                }
+            }
+        }
+        
+        // Don't call adjust_selected_index() here - we've already calculated the correct index
+        // adjust_selected_index() might reset it incorrectly if called from elsewhere
         self.sync_list_state();
         // Auto-select the current item after exiting search
         self.select_current_item();
