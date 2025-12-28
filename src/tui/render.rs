@@ -32,12 +32,12 @@ pub fn render(f: &mut Frame, app: &mut App, layout: &Layout) {
 
     // Render tabs - following ratatui example: tabs render in 1 line without Block
     // Content areas below have borders that visually connect
-    render_tabs(f, layout.tabs_area, app.current_tab, &app.config, app);
+    render_tabs(f, layout.tabs_area, app.ui.current_tab, &app.config, app);
 
     // Render sidebar if not collapsed
-    if app.sidebar_state == crate::tui::app::SidebarState::Expanded && layout.sidebar_area.width > 0 {
+    if app.ui.sidebar_state == crate::tui::app::SidebarState::Expanded && layout.sidebar_area.width > 0 {
         let items = app.get_current_items();
-        match app.current_tab {
+        match app.ui.current_tab {
             crate::tui::app::Tab::Tasks => {
                 let tasks: Vec<_> = items.iter()
                     .filter_map(|item| {
@@ -49,7 +49,7 @@ pub fn render(f: &mut Frame, app: &mut App, layout: &Layout) {
                     })
                     .collect();
                 let total_count = app.tasks.len();
-                render_task_list(f, layout.sidebar_area, &tasks, total_count, &mut app.list_state, &app.config, app.list_view_mode);
+                render_task_list(f, layout.sidebar_area, &tasks, total_count, &mut app.ui.list_state, &app.config, app.ui.list_view_mode);
             }
             crate::tui::app::Tab::Notes => {
                 let notes: Vec<_> = items.iter()
@@ -62,7 +62,7 @@ pub fn render(f: &mut Frame, app: &mut App, layout: &Layout) {
                     })
                     .collect();
                 let total_count = app.notes.len();
-                render_note_list(f, layout.sidebar_area, &notes, total_count, &mut app.list_state, &app.config, app.list_view_mode);
+                render_note_list(f, layout.sidebar_area, &notes, total_count, &mut app.ui.list_state, &app.config, app.ui.list_view_mode);
             }
             crate::tui::app::Tab::Journal => {
                 let journals: Vec<_> = items.iter()
@@ -75,18 +75,18 @@ pub fn render(f: &mut Frame, app: &mut App, layout: &Layout) {
                     })
                     .collect();
                 let total_count = app.journals.len();
-                render_journal_list(f, layout.sidebar_area, &journals, total_count, &mut app.list_state, &app.config, app.list_view_mode);
+                render_journal_list(f, layout.sidebar_area, &journals, total_count, &mut app.ui.list_state, &app.config, app.ui.list_view_mode);
             }
         }
     }
 
     // Render main pane (always render normal content first)
     // Note: Help mode and Settings mode render popup overlays separately after normal content
-    match app.mode {
+    match app.ui.mode {
             crate::tui::app::Mode::Help | crate::tui::app::Mode::View | crate::tui::app::Mode::Filter | crate::tui::app::Mode::NotebookModal => {
                 // View mode - show selected item details (Help mode shows same content with overlay)
-                if let Some(ref item) = app.selected_item {
-                    render_item_view(f, layout.main_area, item, &app.config, app.item_view_scroll);
+                if let Some(ref item) = app.ui.selected_item {
+                    render_item_view(f, layout.main_area, item, &app.config, app.ui.item_view_scroll);
                 } else {
                     // Empty state
                     use ratatui::widgets::{Block, Borders, Paragraph};
@@ -103,7 +103,7 @@ pub fn render(f: &mut Frame, app: &mut App, layout: &Layout) {
                 use ratatui::widgets::{Block, Borders, Paragraph};
                 let active_theme = app.config.get_active_theme();
                 let fg_color = parse_color(&active_theme.fg);
-                let search_text = format!("Search: {}", app.search_query);
+                let search_text = format!("Search: {}", app.search.query);
                 let paragraph = Paragraph::new(search_text)
                     .block(Block::default().borders(Borders::ALL).title("Search"))
                     .style(Style::default().fg(fg_color));
@@ -111,16 +111,16 @@ pub fn render(f: &mut Frame, app: &mut App, layout: &Layout) {
             }
             crate::tui::app::Mode::Create | crate::tui::app::Mode::MarkdownHelp => {
                 // Create mode - render form (MarkdownHelp shows same content with overlay)
-                if let Some(ref form) = app.create_form {
+                if let Some(ref form) = app.form.create_form {
                     match form {
                         crate::tui::app::CreateForm::Task(task_form) => {
-                            render_task_form(f, layout.main_area, task_form, &app.config, &app.notebooks);
+                            render_task_form(f, layout.main_area, task_form, &app.config, &app.notebooks.notebooks);
                         }
                         crate::tui::app::CreateForm::Note(note_form) => {
-                            render_note_form(f, layout.main_area, note_form, &app.config, &app.notebooks);
+                            render_note_form(f, layout.main_area, note_form, &app.config, &app.notebooks.notebooks);
                         }
                         crate::tui::app::CreateForm::Journal(journal_form) => {
-                            render_journal_form(f, layout.main_area, journal_form, &app.config, &app.notebooks);
+                            render_journal_form(f, layout.main_area, journal_form, &app.config, &app.notebooks.notebooks);
                         }
                     }
                 } else {
@@ -136,8 +136,8 @@ pub fn render(f: &mut Frame, app: &mut App, layout: &Layout) {
             }
             crate::tui::app::Mode::Settings => {
                 // Settings mode - show normal content (will be overlaid)
-                if let Some(ref item) = app.selected_item {
-                    render_item_view(f, layout.main_area, item, &app.config, app.item_view_scroll);
+                if let Some(ref item) = app.ui.selected_item {
+                    render_item_view(f, layout.main_area, item, &app.config, app.ui.item_view_scroll);
                 } else {
                     // Empty state
                     use ratatui::widgets::{Block, Borders, Paragraph};
@@ -152,25 +152,25 @@ pub fn render(f: &mut Frame, app: &mut App, layout: &Layout) {
         }
 
     // Render help popup overlay if in help mode (after normal content)
-    if app.mode == crate::tui::app::Mode::Help {
+    if app.ui.mode == crate::tui::app::Mode::Help {
         render_help(f, f.area(), &app.config);
     }
 
     // Render markdown help popup overlay if in markdown help mode (after normal content)
-    if app.mode == crate::tui::app::Mode::MarkdownHelp {
+    if app.ui.mode == crate::tui::app::Mode::MarkdownHelp {
         use crate::tui::widgets::markdown_help::render_markdown_help;
-        render_markdown_help(f, f.area(), &app.config, app.markdown_help_example_scroll, app.markdown_help_rendered_scroll);
+        render_markdown_help(f, f.area(), &app.config, app.ui.markdown_help_example_scroll, app.ui.markdown_help_rendered_scroll);
     }
 
     // Render settings popup overlay if in settings mode (after normal content)
-    if app.mode == crate::tui::app::Mode::Settings {
+    if app.ui.mode == crate::tui::app::Mode::Settings {
         use crate::tui::widgets::settings_view::render_settings_view_modal;
         render_settings_view_modal(f, f.area(), app);
     }
 
     // Render delete confirmation modal if pending (after normal content)
-    if let Some(ref item) = app.delete_confirmation {
-        render_confirm_delete(f, f.area(), item, app.delete_modal_selection, &app.config);
+    if let Some(ref item) = app.modals.delete_confirmation {
+        render_confirm_delete(f, f.area(), item, app.modals.delete_modal_selection, &app.config);
     }
 
     // Render filters box
@@ -178,23 +178,23 @@ pub fn render(f: &mut Frame, app: &mut App, layout: &Layout) {
     render_filters_box(f, layout.filters_area, &filter_summary, &app.config);
 
     // Render filter modal overlay if in filter mode (after normal content)
-    if app.mode == crate::tui::app::Mode::Filter {
+    if app.ui.mode == crate::tui::app::Mode::Filter {
         render_filter_modal(f, f.area(), app);
     }
 
     // Render notebook modal overlay if in notebook modal mode (after normal content)
-    if app.mode == crate::tui::app::Mode::NotebookModal {
+    if app.ui.mode == crate::tui::app::Mode::NotebookModal {
         use crate::tui::widgets::notebook_modal::render_notebook_modal;
         render_notebook_modal(f, f.area(), app);
     }
 
     // Render status bar
     let key_hints = get_key_hints(app);
-    render_status_bar(f, layout.status_area, app.status_message.as_ref(), &key_hints, &app.config);
+    render_status_bar(f, layout.status_area, app.status.message.as_ref(), &key_hints, &app.config);
 }
 
 fn get_key_hints(app: &App) -> Vec<String> {
-    match app.mode {
+    match app.ui.mode {
         crate::tui::app::Mode::Help => {
             vec![
                 format!("Esc or {}: Exit help", crate::utils::format_key_binding_for_display(&app.config.key_bindings.help)),
@@ -257,7 +257,7 @@ fn get_key_hints(app: &App) -> Vec<String> {
             ];
             
             // Add task-specific shortcuts when on Tasks tab
-            if app.current_tab == crate::tui::app::Tab::Tasks {
+            if app.ui.current_tab == crate::tui::app::Tab::Tasks {
                 #[cfg(target_os = "macos")]
                 {
                     hints.push("Opt+↑/↓: Reorder".to_string());

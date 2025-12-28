@@ -37,7 +37,7 @@ pub fn render_filter_modal(f: &mut Frame, area: Rect, app: &App) {
         popup_area.height.saturating_sub(2),
     );
     
-    if let Some(ref state) = app.filter_mode_state {
+    if let Some(ref state) = app.filter.form_state {
         // Split inner area vertically: fields, buttons
         let vertical = Layout::default()
             .direction(Direction::Vertical)
@@ -69,7 +69,7 @@ fn render_filter_fields(
     highlight_bg: ratatui::style::Color,
 ) {
     // Build constraints based on whether we're on Tasks tab (show Status) or not
-    let is_tasks_tab = app.current_tab == crate::tui::app::Tab::Tasks;
+    let is_tasks_tab = app.ui.current_tab == crate::tui::app::Tab::Tasks;
     let mut constraints = vec![
         Constraint::Length(5), // Tags field
         Constraint::Length(5), // Archived selector

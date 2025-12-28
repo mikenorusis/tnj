@@ -90,13 +90,13 @@ pub fn run_event_loop(mut app: App) -> Result<(), TuiError> {
         app.check_status_message_timeout();
 
         // Update form editor scroll before rendering
-        if app.mode == crate::tui::app::Mode::Create {
+        if app.ui.mode == crate::tui::app::Mode::Create {
             // Extract values before borrowing editor
             let sidebar_width_percent = app.config.sidebar_width_percent;
-            let sidebar_collapsed = app.sidebar_state == crate::tui::app::SidebarState::Collapsed;
+            let sidebar_collapsed = app.ui.sidebar_state == crate::tui::app::SidebarState::Collapsed;
             
             // Check if current field is a multi-line field and get form type
-            let (is_multi_line, form_type) = if let Some(ref form) = app.create_form {
+            let (is_multi_line, form_type) = if let Some(ref form) = app.form.create_form {
                 use crate::tui::widgets::form::FormType;
                 let is_multi = match form {
                     crate::tui::app::CreateForm::Task(task_form) => {
@@ -153,7 +153,7 @@ pub fn run_event_loop(mut app: App) -> Result<(), TuiError> {
             let layout = Layout::calculate(
                 f.area(),
                 app.config.sidebar_width_percent,
-                app.sidebar_state == crate::tui::app::SidebarState::Collapsed,
+                app.ui.sidebar_state == crate::tui::app::SidebarState::Collapsed,
             );
             crate::tui::render::render(f, &mut app, &layout);
         })?;
@@ -188,39 +188,39 @@ pub fn run_event_loop(mut app: App) -> Result<(), TuiError> {
 
 fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError> {
     // Handle delete confirmation modal first (before other modes)
-    if app.delete_confirmation.is_some() {
+    if app.modals.delete_confirmation.is_some() {
         match key_event.code {
             KeyCode::Up => {
                 // Move selection up (wrapping from Archive to Cancel)
-                if app.delete_modal_selection == 0 {
-                    app.delete_modal_selection = 2; // Wrap to Cancel
+                if app.modals.delete_modal_selection == 0 {
+                    app.modals.delete_modal_selection = 2; // Wrap to Cancel
                 } else {
-                    app.delete_modal_selection -= 1;
+                    app.modals.delete_modal_selection -= 1;
                 }
                 return Ok(false);
             }
             KeyCode::Down => {
                 // Move selection down (wrapping from Cancel to Archive)
-                if app.delete_modal_selection == 2 {
-                    app.delete_modal_selection = 0; // Wrap to Archive
+                if app.modals.delete_modal_selection == 2 {
+                    app.modals.delete_modal_selection = 0; // Wrap to Archive
                 } else {
-                    app.delete_modal_selection += 1;
+                    app.modals.delete_modal_selection += 1;
                 }
                 return Ok(false);
             }
             KeyCode::Enter => {
                 // Execute selected action
-                if app.delete_modal_selection == 2 {
+                if app.modals.delete_modal_selection == 2 {
                     // Cancel - just close modal
-                    app.delete_confirmation = None;
+                    app.modals.delete_confirmation = None;
                     return Ok(false);
                 }
                 
-                if let Some(ref item) = app.delete_confirmation {
+                if let Some(ref item) = app.modals.delete_confirmation {
                     match item {
                         crate::tui::app::SelectedItem::Task(task) => {
                             if let Some(id) = task.id {
-                                if app.delete_modal_selection == 0 {
+                                if app.modals.delete_modal_selection == 0 {
                                     // Archive
                                     if let Err(e) = app.database.archive_task(id) {
                                         app.set_status_message(format!("Failed to archive task: {}", e));
@@ -233,7 +233,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                                             app.set_status_message("Task archived".to_string());
                                         }
                                     }
-                                } else if app.delete_modal_selection == 1 {
+                                } else if app.modals.delete_modal_selection == 1 {
                                     // Delete
                                     if let Err(e) = app.database.delete_task(id) {
                                         app.set_status_message(format!("Failed to delete task: {}", e));
@@ -253,7 +253,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                         }
                         crate::tui::app::SelectedItem::Note(note) => {
                             if let Some(id) = note.id {
-                                if app.delete_modal_selection == 0 {
+                                if app.modals.delete_modal_selection == 0 {
                                     // Archive
                                     if let Err(e) = app.database.archive_note(id) {
                                         app.set_status_message(format!("Failed to archive note: {}", e));
@@ -266,7 +266,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                                             app.set_status_message("Note archived".to_string());
                                         }
                                     }
-                                } else if app.delete_modal_selection == 1 {
+                                } else if app.modals.delete_modal_selection == 1 {
                                     // Delete
                                     if let Err(e) = app.database.delete_note(id) {
                                         app.set_status_message(format!("Failed to delete note: {}", e));
@@ -286,7 +286,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                         }
                         crate::tui::app::SelectedItem::Journal(journal) => {
                             if let Some(id) = journal.id {
-                                if app.delete_modal_selection == 0 {
+                                if app.modals.delete_modal_selection == 0 {
                                     // Archive
                                     if let Err(e) = app.database.archive_journal(id) {
                                         app.set_status_message(format!("Failed to archive journal entry: {}", e));
@@ -299,7 +299,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                                             app.set_status_message("Journal archived".to_string());
                                         }
                                     }
-                                } else if app.delete_modal_selection == 1 {
+                                } else if app.modals.delete_modal_selection == 1 {
                                     // Delete
                                     if let Err(e) = app.database.delete_journal(id) {
                                         app.set_status_message(format!("Failed to delete journal entry: {}", e));
@@ -319,12 +319,12 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                         }
                     }
                 }
-                app.delete_confirmation = None;
+                app.modals.delete_confirmation = None;
                 return Ok(false);
             }
             KeyCode::Esc => {
                 // Cancel deletion
-                app.delete_confirmation = None;
+                app.modals.delete_confirmation = None;
                 return Ok(false);
             }
             _ => {
@@ -335,7 +335,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
     }
 
     // Handle markdown help mode first (before create mode)
-    if app.mode == crate::tui::app::Mode::MarkdownHelp {
+    if app.ui.mode == crate::tui::app::Mode::MarkdownHelp {
         match key_event.code {
             KeyCode::Esc => {
                 app.exit_markdown_help_mode();
@@ -390,8 +390,8 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                 return Ok(false);
             }
             KeyCode::Home => {
-                app.markdown_help_example_scroll = 0;
-                app.markdown_help_rendered_scroll = 0;
+                app.ui.markdown_help_example_scroll = 0;
+                app.ui.markdown_help_rendered_scroll = 0;
                 return Ok(false);
             }
             KeyCode::End => {
@@ -406,8 +406,8 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                     let example_total_lines = example_text.lines().count();
                     
                     // Use example lines as approximation for rendered lines
-                    app.markdown_help_example_scroll = example_total_lines.saturating_sub(viewport_height);
-                    app.markdown_help_rendered_scroll = example_total_lines.saturating_sub(viewport_height);
+                    app.ui.markdown_help_example_scroll = example_total_lines.saturating_sub(viewport_height);
+                    app.ui.markdown_help_rendered_scroll = example_total_lines.saturating_sub(viewport_height);
                 }
                 return Ok(false);
             }
@@ -427,7 +427,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
 
     // Handle create mode (before edit mode)
     // When in create mode, handle form navigation and editor input
-    if app.mode == crate::tui::app::Mode::Create {
+    if app.ui.mode == crate::tui::app::Mode::Create {
         // Check for save binding (Ctrl+s or Alt+s on macOS)
         let save_binding = parse_key_binding(&app.config.key_bindings.save)
             .map_err(|e| TuiError::KeyBindingError(e))?;
@@ -469,7 +469,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
         if app.is_notebook_field_active() {
             match key_event.code {
                 KeyCode::Up => {
-                    if let Some(ref mut form) = app.create_form {
+                    if let Some(ref mut form) = app.form.create_form {
                         match form {
                             crate::tui::app::CreateForm::Task(task_form) => {
                                 if task_form.notebook_selected_index > 0 {
@@ -477,7 +477,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                                     task_form.notebook_id = if task_form.notebook_selected_index == 0 {
                                         None
                                     } else {
-                                        app.notebooks.get(task_form.notebook_selected_index - 1)
+                                        app.notebooks.notebooks.get(task_form.notebook_selected_index - 1)
                                             .and_then(|n| n.id)
                                     };
                                 }
@@ -488,7 +488,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                                     note_form.notebook_id = if note_form.notebook_selected_index == 0 {
                                         None
                                     } else {
-                                        app.notebooks.get(note_form.notebook_selected_index - 1)
+                                        app.notebooks.notebooks.get(note_form.notebook_selected_index - 1)
                                             .and_then(|n| n.id)
                                     };
                                 }
@@ -499,7 +499,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                                     journal_form.notebook_id = if journal_form.notebook_selected_index == 0 {
                                         None
                                     } else {
-                                        app.notebooks.get(journal_form.notebook_selected_index - 1)
+                                        app.notebooks.notebooks.get(journal_form.notebook_selected_index - 1)
                                             .and_then(|n| n.id)
                                     };
                                 }
@@ -509,13 +509,13 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                     return Ok(false);
                 }
                 KeyCode::Down => {
-                    if let Some(ref mut form) = app.create_form {
+                    if let Some(ref mut form) = app.form.create_form {
                         // max_valid_index is app.notebooks.len() (the last valid index)
                         // Index 0 = "[None]", indices 1..=len() = notebooks
                         // So if we have 3 notebooks, valid indices are 0, 1, 2, 3
                         // We use len() + 1 for the comparison to allow reaching index len()
-                        let max_valid_index = app.notebooks.len();
-                        let max_index_for_check = app.notebooks.len() + 1;
+                        let max_valid_index = app.notebooks.notebooks.len();
+                        let max_index_for_check = app.notebooks.notebooks.len() + 1;
                         match form {
                             crate::tui::app::CreateForm::Task(task_form) => {
                                 if task_form.notebook_selected_index < max_index_for_check {
@@ -527,7 +527,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                                     task_form.notebook_id = if task_form.notebook_selected_index == 0 {
                                         None
                                     } else {
-                                        app.notebooks.get(task_form.notebook_selected_index - 1)
+                                        app.notebooks.notebooks.get(task_form.notebook_selected_index - 1)
                                             .and_then(|n| n.id)
                                     };
                                 }
@@ -542,7 +542,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                                     note_form.notebook_id = if note_form.notebook_selected_index == 0 {
                                         None
                                     } else {
-                                        app.notebooks.get(note_form.notebook_selected_index - 1)
+                                        app.notebooks.notebooks.get(note_form.notebook_selected_index - 1)
                                             .and_then(|n| n.id)
                                     };
                                 }
@@ -557,7 +557,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                                     journal_form.notebook_id = if journal_form.notebook_selected_index == 0 {
                                         None
                                     } else {
-                                        app.notebooks.get(journal_form.notebook_selected_index - 1)
+                                        app.notebooks.notebooks.get(journal_form.notebook_selected_index - 1)
                                             .and_then(|n| n.id)
                                     };
                                 }
@@ -733,7 +733,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
     }
 
     // Handle help mode
-    if app.mode == crate::tui::app::Mode::Help {
+    if app.ui.mode == crate::tui::app::Mode::Help {
         match key_event.code {
             KeyCode::Esc => {
                 app.exit_help_mode();
@@ -754,7 +754,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
     }
 
     // Handle settings mode
-    if app.mode == crate::tui::app::Mode::Settings {
+    if app.ui.mode == crate::tui::app::Mode::Settings {
         match key_event.code {
             KeyCode::Esc => {
                 app.exit_settings_mode();
@@ -775,7 +775,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
     }
 
     // Handle notebook modal mode
-    if app.mode == crate::tui::app::Mode::NotebookModal {
+    if app.ui.mode == crate::tui::app::Mode::NotebookModal {
         match key_event.code {
             KeyCode::Esc => {
                 app.exit_notebook_modal_mode();
@@ -810,7 +810,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
             }
         }
 
-        if let Some(ref mut state) = app.notebook_modal_state {
+        if let Some(ref mut state) = app.notebooks.modal_state {
             // Handle field navigation
             match key_event.code {
                 KeyCode::Tab => {
@@ -846,7 +846,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                         let selected_idx = state.selected_index;
                         let mode = state.mode.clone();
                         let notebook_id_opt = if selected_idx > 0 {
-                            app.notebooks.get(selected_idx - 1).and_then(|n| n.id)
+                            app.notebooks.notebooks.get(selected_idx - 1).and_then(|n| n.id)
                         } else {
                             None
                         };
@@ -860,8 +860,8 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                                     app.set_status_message(format!("Failed to add notebook: {}", e));
                                 } else {
                                     // Reload notebooks
-                                    app.notebooks = app.database.get_all_notebooks().unwrap_or_default();
-                                    if let Some(ref mut new_state) = app.notebook_modal_state {
+                                    app.notebooks.notebooks = app.database.get_all_notebooks().unwrap_or_default();
+                                    if let Some(ref mut new_state) = app.notebooks.modal_state {
                                         new_state.mode = crate::tui::app::NotebookModalMode::View;
                                         new_state.name_editor = Editor::new();
                                     }
@@ -873,8 +873,8 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                                         app.set_status_message(format!("Failed to rename notebook: {}", e));
                                     } else {
                                         // Reload notebooks
-                                        app.notebooks = app.database.get_all_notebooks().unwrap_or_default();
-                                        if let Some(ref mut new_state) = app.notebook_modal_state {
+                                        app.notebooks.notebooks = app.database.get_all_notebooks().unwrap_or_default();
+                                        if let Some(ref mut new_state) = app.notebooks.modal_state {
                                             new_state.mode = crate::tui::app::NotebookModalMode::View;
                                             new_state.name_editor = Editor::new();
                                         }
@@ -895,12 +895,12 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                         crate::tui::app::NotebookModalField::Rename => {
                             if state.selected_index > 0 {
                                 // Can't rename "[None]"
-                                let notebook_id = app.notebooks.get(state.selected_index - 1)
+                                let notebook_id = app.notebooks.notebooks.get(state.selected_index - 1)
                                     .and_then(|n| n.id);
                                 if let Some(id) = notebook_id {
                                     state.mode = crate::tui::app::NotebookModalMode::Rename;
                                     state.name_editor = Editor::from_string(
-                                        app.notebooks.iter()
+                                        app.notebooks.notebooks.iter()
                                             .find(|n| n.id == Some(id))
                                             .map(|n| n.name.clone())
                                             .unwrap_or_default()
@@ -911,7 +911,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                         crate::tui::app::NotebookModalField::Delete => {
                             if state.selected_index > 0 {
                                 // Can't delete "[None]"
-                                let notebook_id = app.notebooks.get(state.selected_index - 1)
+                                let notebook_id = app.notebooks.notebooks.get(state.selected_index - 1)
                                     .and_then(|n| n.id);
                                 if let Some(id) = notebook_id {
                                     let selected_idx = state.selected_index;
@@ -922,10 +922,10 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                                         app.set_status_message(format!("Failed to delete notebook: {}", e));
                                     } else {
                                         // Reload notebooks and reset selection
-                                        app.notebooks = app.database.get_all_notebooks().unwrap_or_default();
-                                        if let Some(ref mut new_state) = app.notebook_modal_state {
-                                            if selected_idx > app.notebooks.len() {
-                                                new_state.selected_index = app.notebooks.len();
+                                        app.notebooks.notebooks = app.database.get_all_notebooks().unwrap_or_default();
+                                        if let Some(ref mut new_state) = app.notebooks.modal_state {
+                                            if selected_idx > app.notebooks.notebooks.len() {
+                                                new_state.selected_index = app.notebooks.notebooks.len();
                                             }
                                             new_state.list_state.select(Some(new_state.selected_index));
                                         }
@@ -937,7 +937,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                             let notebook_id = if state.selected_index == 0 {
                                 None // "[None]"
                             } else {
-                                app.notebooks.get(state.selected_index - 1)
+                                app.notebooks.notebooks.get(state.selected_index - 1)
                                     .and_then(|n| n.id)
                             };
                             if let Err(e) = app.switch_notebook(notebook_id) {
@@ -952,7 +952,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                             let notebook_id = if state.selected_index == 0 {
                                 None // "[None]"
                             } else {
-                                app.notebooks.get(state.selected_index - 1)
+                                app.notebooks.notebooks.get(state.selected_index - 1)
                                     .and_then(|n| n.id)
                             };
                             if let Err(e) = app.switch_notebook(notebook_id) {
@@ -1018,7 +1018,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
     }
 
     // Handle search mode
-    if app.mode == crate::tui::app::Mode::Search {
+    if app.ui.mode == crate::tui::app::Mode::Search {
         match key_event.code {
             KeyCode::Esc => {
                 app.exit_search_mode();
@@ -1041,7 +1041,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
     }
 
     // Handle filter mode
-    if app.mode == crate::tui::app::Mode::Filter {
+    if app.ui.mode == crate::tui::app::Mode::Filter {
         match key_event.code {
             KeyCode::Esc => {
                 app.exit_filter_mode();
@@ -1058,7 +1058,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
             }
             KeyCode::Enter => {
                 // Check which field is active
-                if let Some(ref state) = app.filter_mode_state {
+                if let Some(ref state) = app.filter.form_state {
                     match state.current_field {
                         crate::tui::app::FilterFormField::Apply => {
                             app.apply_filters();
@@ -1082,7 +1082,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                 }
             }
             KeyCode::Up => {
-                if let Some(ref mut state) = app.filter_mode_state {
+                if let Some(ref mut state) = app.filter.form_state {
                     match state.current_field {
                         crate::tui::app::FilterFormField::Archived => {
                             app.move_filter_archived_up();
@@ -1116,7 +1116,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                 }
             }
             KeyCode::Down => {
-                if let Some(ref mut state) = app.filter_mode_state {
+                if let Some(ref mut state) = app.filter.form_state {
                     match state.current_field {
                         crate::tui::app::FilterFormField::Archived => {
                             app.move_filter_archived_down();
@@ -1299,7 +1299,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
     }
     
     if is_notebook_modal {
-        if app.mode == crate::tui::app::Mode::NotebookModal {
+        if app.ui.mode == crate::tui::app::Mode::NotebookModal {
             app.exit_notebook_modal_mode();
         } else {
             app.enter_notebook_modal_mode();
@@ -1311,7 +1311,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
     let tab_left_binding = parse_key_binding(&app.config.key_bindings.tab_left)
         .map_err(|e| TuiError::KeyBindingError(e))?;
     if matches_key_event(key_event, &tab_left_binding) {
-        match app.current_tab {
+        match app.ui.current_tab {
             crate::tui::app::Tab::Tasks => {
                 // Already at first tab, do nothing
             }
@@ -1328,7 +1328,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
     let tab_right_binding = parse_key_binding(&app.config.key_bindings.tab_right)
         .map_err(|e| TuiError::KeyBindingError(e))?;
     if matches_key_event(key_event, &tab_right_binding) {
-        match app.current_tab {
+        match app.ui.current_tab {
             crate::tui::app::Tab::Tasks => {
                 app.switch_tab(crate::tui::app::Tab::Notes);
             }
@@ -1343,8 +1343,8 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
     }
 
     // Check for task reordering (Ctrl+Up/Down or Alt+Up/Down on macOS) - only on Tasks tab in View mode
-    if app.mode == crate::tui::app::Mode::View 
-        && app.current_tab == crate::tui::app::Tab::Tasks
+    if app.ui.mode == crate::tui::app::Mode::View 
+        && app.ui.current_tab == crate::tui::app::Tab::Tasks
         && crate::utils::has_primary_modifier(key_event.modifiers) {
         match key_event.code {
             KeyCode::Up => {
@@ -1366,10 +1366,10 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
     // Check for arrow key navigation (when not in create mode)
     // Arrow keys work as an alternative to configured bindings
     // In Settings mode, Up/Down arrows navigate between categories
-    if app.mode != crate::tui::app::Mode::Create {
+    if app.ui.mode != crate::tui::app::Mode::Create {
         match key_event.code {
             KeyCode::Up => {
-                if app.mode == crate::tui::app::Mode::Settings {
+                if app.ui.mode == crate::tui::app::Mode::Settings {
                     // Up/Down arrows navigate between settings categories
                     app.move_settings_category_up();
                 } else {
@@ -1378,7 +1378,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                 return Ok(false);
             }
             KeyCode::Down => {
-                if app.mode == crate::tui::app::Mode::Settings {
+                if app.ui.mode == crate::tui::app::Mode::Settings {
                     // Up/Down arrows navigate between settings categories
                     app.move_settings_category_down();
                 } else {
@@ -1388,7 +1388,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
             }
             KeyCode::PageUp => {
                 // Scroll item view page up if in View mode with selected item
-                if app.mode == crate::tui::app::Mode::View && app.selected_item.is_some() {
+                if app.ui.mode == crate::tui::app::Mode::View && app.ui.selected_item.is_some() {
                     if let Ok((_, height)) = terminal_size() {
                         use crate::tui::layout::Layout;
                         use ratatui::layout::Rect;
@@ -1396,7 +1396,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                         let layout = Layout::calculate(
                             rect,
                             app.config.sidebar_width_percent,
-                            app.sidebar_state == crate::tui::app::SidebarState::Collapsed,
+                            app.ui.sidebar_state == crate::tui::app::SidebarState::Collapsed,
                         );
                         let viewport_height = (layout.main_area.height - 2) as usize;
                         app.scroll_item_view_page_up(viewport_height);
@@ -1406,7 +1406,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
             }
             KeyCode::PageDown => {
                 // Scroll item view page down if in View mode with selected item
-                if app.mode == crate::tui::app::Mode::View && app.selected_item.is_some() {
+                if app.ui.mode == crate::tui::app::Mode::View && app.ui.selected_item.is_some() {
                     if let Ok((_, height)) = terminal_size() {
                         use crate::tui::layout::Layout;
                         use ratatui::layout::Rect;
@@ -1414,7 +1414,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                         let layout = Layout::calculate(
                             rect,
                             app.config.sidebar_width_percent,
-                            app.sidebar_state == crate::tui::app::SidebarState::Collapsed,
+                            app.ui.sidebar_state == crate::tui::app::SidebarState::Collapsed,
                         );
                         let viewport_height = (layout.main_area.height - 2) as usize;
                         app.scroll_item_view_page_down(viewport_height);
@@ -1424,14 +1424,14 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
             }
             KeyCode::Home => {
                 // Scroll item view to top if in View mode with selected item
-                if app.mode == crate::tui::app::Mode::View && app.selected_item.is_some() {
+                if app.ui.mode == crate::tui::app::Mode::View && app.ui.selected_item.is_some() {
                     app.scroll_item_view_to_top();
                 }
                 return Ok(false);
             }
             KeyCode::End => {
                 // Scroll item view to bottom if in View mode with selected item
-                if app.mode == crate::tui::app::Mode::View && app.selected_item.is_some() {
+                if app.ui.mode == crate::tui::app::Mode::View && app.ui.selected_item.is_some() {
                     if let Ok((_, height)) = terminal_size() {
                         use crate::tui::layout::Layout;
                         use ratatui::layout::Rect;
@@ -1439,7 +1439,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                         let layout = Layout::calculate(
                             rect,
                             app.config.sidebar_width_percent,
-                            app.sidebar_state == crate::tui::app::SidebarState::Collapsed,
+                            app.ui.sidebar_state == crate::tui::app::SidebarState::Collapsed,
                         );
                         let viewport_height = (layout.main_area.height - 2) as usize;
                         app.scroll_item_view_to_bottom(viewport_height);
@@ -1456,10 +1456,10 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
     let list_down_binding = parse_key_binding(&app.config.key_bindings.list_down)
         .map_err(|e| TuiError::KeyBindingError(e))?;
     if matches_key_event(key_event, &list_down_binding) {
-        if app.mode == crate::tui::app::Mode::Settings {
+        if app.ui.mode == crate::tui::app::Mode::Settings {
             // Navigate within current settings category
             let categories = app.get_settings_categories();
-            if let Some(category) = categories.get(app.settings_category_index) {
+            if let Some(category) = categories.get(app.settings.category_index) {
                 if category == "Theme Settings" {
                     app.move_settings_theme_selection_down();
                 } else if category == "Appearance Settings" {
@@ -1477,10 +1477,10 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
     let list_up_binding = parse_key_binding(&app.config.key_bindings.list_up)
         .map_err(|e| TuiError::KeyBindingError(e))?;
     if matches_key_event(key_event, &list_up_binding) {
-        if app.mode == crate::tui::app::Mode::Settings {
+        if app.ui.mode == crate::tui::app::Mode::Settings {
             // Navigate within current settings category
             let categories = app.get_settings_categories();
-            if let Some(category) = categories.get(app.settings_category_index) {
+            if let Some(category) = categories.get(app.settings.category_index) {
                 if category == "Theme Settings" {
                     app.move_settings_theme_selection_up();
                 } else if category == "Appearance Settings" {
@@ -1521,7 +1521,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
     let settings_binding = parse_key_binding(&app.config.key_bindings.settings)
         .map_err(|e| TuiError::KeyBindingError(e))?;
     if matches_key_event(key_event, &settings_binding) {
-        if app.mode == crate::tui::app::Mode::Settings {
+        if app.ui.mode == crate::tui::app::Mode::Settings {
             app.exit_settings_mode();
         } else {
             app.enter_settings_mode();
@@ -1534,12 +1534,12 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
         .map_err(|e| TuiError::KeyBindingError(e))?;
     if matches_key_event(key_event, &select_binding) {
         // In Settings mode, Enter applies selected setting based on category
-        if app.mode == crate::tui::app::Mode::Settings {
+        if app.ui.mode == crate::tui::app::Mode::Settings {
             let categories = app.get_settings_categories();
-            if let Some(category) = categories.get(app.settings_category_index) {
+            if let Some(category) = categories.get(app.settings.category_index) {
                 if category == "Theme Settings" {
                     let themes = app.get_available_themes();
-                    if let Some(theme_name) = themes.get(app.settings_theme_index) {
+                    if let Some(theme_name) = themes.get(app.settings.theme_index) {
                         if let Err(e) = app.select_theme(theme_name) {
                             app.set_status_message(format!("Failed to change theme: {}", e));
                         }
@@ -1583,9 +1583,9 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
         .map_err(|e| TuiError::KeyBindingError(e))?;
     if matches_key_event(key_event, &delete_binding) {
         // Show confirmation modal instead of deleting immediately
-        if let Some(ref item) = app.selected_item {
-            app.delete_confirmation = Some(item.clone());
-            app.delete_modal_selection = 0; // Initialize to Archive option
+        if let Some(ref item) = app.ui.selected_item {
+            app.modals.delete_confirmation = Some(item.clone());
+            app.modals.delete_modal_selection = 0; // Initialize to Archive option
         } else {
             app.set_status_message("No item selected".to_string());
         }
@@ -1613,7 +1613,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
         .map_err(|e| TuiError::KeyBindingError(e))?;
     if matches_key_event(key_event, &help_binding) {
         // If in Create mode, show markdown help; otherwise show regular help
-        if app.mode == crate::tui::app::Mode::Create {
+        if app.ui.mode == crate::tui::app::Mode::Create {
             app.enter_markdown_help_mode();
         } else {
             app.enter_help_mode();

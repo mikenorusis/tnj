@@ -46,7 +46,7 @@ pub fn render_notebook_modal(f: &mut Frame, area: Rect, app: &App) {
         popup_area.height.saturating_sub(2),
     );
     
-    if let Some(ref state) = app.notebook_modal_state {
+    if let Some(ref state) = app.notebooks.modal_state {
         // Split into notebook list (left) and actions (right)
         let horizontal = Layout::default()
             .direction(Direction::Horizontal)
@@ -59,7 +59,7 @@ pub fn render_notebook_modal(f: &mut Frame, area: Rect, app: &App) {
         // Build notebook list with "[None]" first
         let mut notebook_items: Vec<ListItem> = vec![];
         notebook_items.push(ListItem::new("[None]"));
-        for notebook in &app.notebooks {
+        for notebook in &app.notebooks.notebooks {
             notebook_items.push(ListItem::new(notebook.name.clone()));
         }
         

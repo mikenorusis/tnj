@@ -181,42 +181,173 @@ pub enum SelectedItem {
     Journal(JournalEntry),
 }
 
-pub struct App {
-    pub config: Config,
-    pub database: Database,
+#[derive(Debug, Clone)]
+pub struct UiState {
     pub current_tab: Tab,
     pub sidebar_state: SidebarState,
+    pub mode: Mode,
     pub selected_index: usize,
     pub list_state: ListState,
+    pub selected_item: Option<SelectedItem>,
+    pub item_view_scroll: usize,
+    pub markdown_help_example_scroll: usize,
+    pub markdown_help_rendered_scroll: usize,
+    pub list_view_mode: ListViewMode,
+}
+
+impl Default for UiState {
+    fn default() -> Self {
+        Self {
+            current_tab: Tab::Tasks,
+            sidebar_state: SidebarState::Expanded,
+            mode: Mode::View,
+            selected_index: 0,
+            list_state: ListState::default(),
+            selected_item: None,
+            item_view_scroll: 0,
+            markdown_help_example_scroll: 0,
+            markdown_help_rendered_scroll: 0,
+            list_view_mode: ListViewMode::Simple,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FilterState {
+    pub tags: Option<String>,
+    pub archived: Option<FilterArchivedStatus>,
+    pub task_status: Option<FilterTaskStatus>,
+    pub tag_logic: FilterTagLogic,
+    pub form_state: Option<FilterFormState>,
+}
+
+impl Default for FilterState {
+    fn default() -> Self {
+        Self {
+            tags: None,
+            archived: Some(FilterArchivedStatus::Active),
+            task_status: None,
+            tag_logic: FilterTagLogic::And,
+            form_state: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SettingsState {
+    pub category_index: usize,
+    pub theme_index: usize,
+    pub list_state: ListState,
+    pub theme_list_state: ListState,
+    pub sidebar_width_index: usize,
+    pub display_mode_index: usize,
+}
+
+impl Default for SettingsState {
+    fn default() -> Self {
+        Self {
+            category_index: 0,
+            theme_index: 0,
+            list_state: ListState::default(),
+            theme_list_state: ListState::default(),
+            sidebar_width_index: 0,
+            display_mode_index: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ModalState {
+    pub delete_confirmation: Option<SelectedItem>,
+    pub delete_modal_selection: usize,
+}
+
+impl Default for ModalState {
+    fn default() -> Self {
+        Self {
+            delete_confirmation: None,
+            delete_modal_selection: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct NotebookState {
+    pub current_notebook_id: Option<i64>,
+    pub notebooks: Vec<Notebook>,
+    pub modal_state: Option<NotebookModalState>,
+}
+
+impl Default for NotebookState {
+    fn default() -> Self {
+        Self {
+            current_notebook_id: None,
+            notebooks: Vec::new(),
+            modal_state: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct StatusState {
+    pub message: Option<String>,
+    pub message_time: Option<Instant>,
+}
+
+impl Default for StatusState {
+    fn default() -> Self {
+        Self {
+            message: None,
+            message_time: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchState {
+    pub query: String,
+}
+
+impl Default for SearchState {
+    fn default() -> Self {
+        Self {
+            query: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FormState {
+    pub create_form: Option<CreateForm>,
+}
+
+impl Default for FormState {
+    fn default() -> Self {
+        Self {
+            create_form: None,
+        }
+    }
+}
+
+pub struct App {
+    // Core infrastructure
+    pub config: Config,
+    pub database: Database,
+    
+    // Data collections (frequently accessed, keep at top level)
     pub tasks: Vec<Task>,
     pub notes: Vec<Note>,
     pub journals: Vec<JournalEntry>,
-    pub selected_item: Option<SelectedItem>,
-    pub mode: Mode,
-    pub search_query: String,
-    pub status_message: Option<String>,
-    pub status_message_time: Option<Instant>,
-    pub create_form: Option<CreateForm>,
-    pub item_view_scroll: usize, // Scroll offset for item view content
-    pub markdown_help_example_scroll: usize, // Scroll offset for markdown help example panel
-    pub markdown_help_rendered_scroll: usize, // Scroll offset for markdown help rendered panel
-    pub settings_category_index: usize, // Selected settings category
-    pub settings_theme_index: usize, // Selected theme in theme selector
-    pub settings_list_state: ListState, // ListState for settings categories
-    pub settings_theme_list_state: ListState, // ListState for theme selector
-    pub settings_sidebar_width_index: usize, // Selected sidebar width option
-    pub settings_display_mode_index: usize, // Selected display mode option
-    pub list_view_mode: ListViewMode, // Current list view mode
-    pub delete_confirmation: Option<SelectedItem>, // Item pending deletion confirmation
-    pub delete_modal_selection: usize, // Selected option in delete modal (0=Archive, 1=Delete, 2=Cancel)
-    pub filter_tags: Option<String>, // Comma-separated tag filter
-    pub filter_archived: Option<FilterArchivedStatus>, // Active/Archived/All filter
-    pub filter_task_status: Option<FilterTaskStatus>, // Todo/Done/All filter (task-specific)
-    pub filter_tag_logic: FilterTagLogic, // AND/OR for tag matching
-    pub filter_mode_state: Option<FilterFormState>, // State for filter modal editing
-    pub current_notebook_id: Option<i64>, // Currently selected notebook (None = "[None]")
-    pub notebooks: Vec<Notebook>, // List of all notebooks (does NOT include "[None]" - it's virtual)
-    pub notebook_modal_state: Option<NotebookModalState>, // State for notebook management modal
+    
+    // Grouped state
+    pub ui: UiState,
+    pub filter: FilterState,
+    pub settings: SettingsState,
+    pub modals: ModalState,
+    pub notebooks: NotebookState,
+    pub status: StatusState,
+    pub search: SearchState,
+    pub form: FormState,
 }
 
 impl App {
@@ -247,39 +378,55 @@ impl App {
         let mut app = Self {
             config,
             database,
-            current_tab: Tab::Tasks,
-            sidebar_state: SidebarState::Expanded,
-            selected_index: 0,
-            list_state: ListState::default(),
             tasks: Vec::new(),
             notes: Vec::new(),
             journals: Vec::new(),
-            selected_item: None,
-            mode: Mode::View,
-            search_query: String::new(),
-            status_message: None,
-            status_message_time: None,
-            create_form: None,
-            item_view_scroll: 0,
-            markdown_help_example_scroll: 0,
-            markdown_help_rendered_scroll: 0,
-            settings_category_index: 0,
-            settings_theme_index: 0,
-            settings_list_state: ListState::default(),
-            settings_theme_list_state: ListState::default(),
-            settings_sidebar_width_index: 0,
-            settings_display_mode_index: 0,
-            list_view_mode,
-            delete_confirmation: None,
-            delete_modal_selection: 0,
-            filter_tags: None,
-            filter_archived: Some(FilterArchivedStatus::Active),
-            filter_task_status: None,
-            filter_tag_logic: FilterTagLogic::And,
-            filter_mode_state: None,
-            current_notebook_id: None, // Start with "[None]" selected
-            notebooks,
-            notebook_modal_state: None,
+            ui: UiState {
+                current_tab: Tab::Tasks,
+                sidebar_state: SidebarState::Expanded,
+                mode: Mode::View,
+                selected_index: 0,
+                list_state: ListState::default(),
+                selected_item: None,
+                item_view_scroll: 0,
+                markdown_help_example_scroll: 0,
+                markdown_help_rendered_scroll: 0,
+                list_view_mode,
+            },
+            filter: FilterState {
+                tags: None,
+                archived: Some(FilterArchivedStatus::Active),
+                task_status: None,
+                tag_logic: FilterTagLogic::And,
+                form_state: None,
+            },
+            settings: SettingsState {
+                category_index: 0,
+                theme_index: 0,
+                list_state: ListState::default(),
+                theme_list_state: ListState::default(),
+                sidebar_width_index: 0,
+                display_mode_index: 0,
+            },
+            modals: ModalState {
+                delete_confirmation: None,
+                delete_modal_selection: 0,
+            },
+            notebooks: NotebookState {
+                current_notebook_id: None, // Start with "[None]" selected
+                notebooks,
+                modal_state: None,
+            },
+            status: StatusState {
+                message: None,
+                message_time: None,
+            },
+            search: SearchState {
+                query: String::new(),
+            },
+            form: FormState {
+                create_form: None,
+            },
         };
         
         app.load_data()?;
@@ -291,16 +438,16 @@ impl App {
 
     pub fn load_data(&mut self) -> Result<(), DatabaseError> {
         // Load archived items if filter requires them
-        let need_archived = matches!(self.filter_archived, Some(FilterArchivedStatus::Archived) | Some(FilterArchivedStatus::All));
+        let need_archived = matches!(self.filter.archived, Some(FilterArchivedStatus::Archived) | Some(FilterArchivedStatus::All));
         
         if need_archived {
-            self.tasks = self.database.get_all_tasks_including_archived(self.current_notebook_id)?;
-            self.notes = self.database.get_all_notes_including_archived(self.current_notebook_id)?;
-            self.journals = self.database.get_all_journals_including_archived(self.current_notebook_id)?;
+            self.tasks = self.database.get_all_tasks_including_archived(self.notebooks.current_notebook_id)?;
+            self.notes = self.database.get_all_notes_including_archived(self.notebooks.current_notebook_id)?;
+            self.journals = self.database.get_all_journals_including_archived(self.notebooks.current_notebook_id)?;
         } else {
-            self.tasks = self.database.get_all_tasks(self.current_notebook_id)?;
-            self.notes = self.database.get_all_notes(self.current_notebook_id)?;
-            self.journals = self.database.get_all_journals(self.current_notebook_id)?;
+            self.tasks = self.database.get_all_tasks(self.notebooks.current_notebook_id)?;
+            self.notes = self.database.get_all_notes(self.notebooks.current_notebook_id)?;
+            self.journals = self.database.get_all_journals(self.notebooks.current_notebook_id)?;
         }
         
         // Assign order values to tasks that don't have them (migration)
@@ -320,9 +467,9 @@ impl App {
             }
             // Reload to get updated data, respecting the archived filter
             if need_archived {
-                self.tasks = self.database.get_all_tasks_including_archived(self.current_notebook_id)?;
+                self.tasks = self.database.get_all_tasks_including_archived(self.notebooks.current_notebook_id)?;
             } else {
-                self.tasks = self.database.get_all_tasks(self.current_notebook_id)?;
+                self.tasks = self.database.get_all_tasks(self.notebooks.current_notebook_id)?;
             }
         }
         
@@ -330,7 +477,7 @@ impl App {
         self.adjust_selected_index();
         
         // Always select an item if there are items available (especially for tasks)
-        if self.current_tab == Tab::Tasks && !self.tasks.is_empty() {
+        if self.ui.current_tab == Tab::Tasks && !self.tasks.is_empty() {
             self.select_current_item();
         }
         
@@ -339,7 +486,7 @@ impl App {
 
     pub fn get_current_items(&self) -> Vec<Item> {
         // Create base iterator from current tab (lazy, no allocation yet)
-        let base_iter: Box<dyn Iterator<Item = Item>> = match self.current_tab {
+        let base_iter: Box<dyn Iterator<Item = Item>> = match self.ui.current_tab {
             Tab::Tasks => Box::new(self.tasks.iter().map(|t| Item::Task(t.clone()))),
             Tab::Notes => Box::new(self.notes.iter().map(|n| Item::Note(n.clone()))),
             Tab::Journal => Box::new(self.journals.iter().map(|j| Item::Journal(j.clone()))),
@@ -349,15 +496,15 @@ impl App {
         let filtered_iter = base_iter
             // Filter by search query if in search mode
             .filter(|item: &Item| {
-                if self.mode == Mode::Search && !self.search_query.is_empty() {
-                    item.matches_search(&self.search_query)
+                if self.ui.mode == Mode::Search && !self.search.query.is_empty() {
+                    item.matches_search(&self.search.query)
                 } else {
                     true
                 }
             })
             // Filter by archived status
             .filter(|item: &Item| {
-                if let Some(archived_status) = self.filter_archived {
+                if let Some(archived_status) = self.filter.archived {
                     let item_archived = match item {
                         Item::Task(t) => t.archived,
                         Item::Note(n) => n.archived,
@@ -374,9 +521,9 @@ impl App {
             })
             // Filter by tags
             .filter(|item: &Item| {
-                if let Some(ref filter_tags) = self.filter_tags {
+                if let Some(ref filter_tags) = self.filter.tags {
                     if !filter_tags.trim().is_empty() {
-                        item.matches_tag_filter(filter_tags, self.filter_tag_logic)
+                        item.matches_tag_filter(filter_tags, self.filter.tag_logic)
                     } else {
                         true
                     }
@@ -386,8 +533,8 @@ impl App {
             })
             // Filter by task status (only for tasks)
             .filter(|item: &Item| {
-                if self.current_tab == Tab::Tasks {
-                    if let Some(task_status) = self.filter_task_status {
+                if self.ui.current_tab == Tab::Tasks {
+                    if let Some(task_status) = self.filter.task_status {
                         match item {
                             Item::Task(t) => {
                                 match task_status {
@@ -411,7 +558,7 @@ impl App {
     }
 
     pub fn get_current_item(&self) -> Option<&SelectedItem> {
-        self.selected_item.as_ref()
+        self.ui.selected_item.as_ref()
     }
 
     /// Get the display index to item index mapping for GroupedByTags mode
@@ -423,7 +570,7 @@ impl App {
 
         let items = self.get_current_items();
         
-        if self.list_view_mode != ListViewMode::GroupedByTags {
+        if self.ui.list_view_mode != ListViewMode::GroupedByTags {
             // For non-grouped modes, all display indices map directly to item indices
             let is_heading: Vec<bool> = vec![false; items.len()];
             let item_indices: Vec<Option<usize>> = (0..items.len()).map(Some).collect();
@@ -486,25 +633,25 @@ impl App {
     pub fn select_current_item(&mut self) {
         let items = self.get_current_items();
         
-        if self.list_view_mode == ListViewMode::GroupedByTags {
+        if self.ui.list_view_mode == ListViewMode::GroupedByTags {
             let (is_heading, item_indices) = self.get_display_index_mapping();
             
             // Check if current display index is valid
-            if self.selected_index >= is_heading.len() {
-                self.selected_item = None;
+            if self.ui.selected_index >= is_heading.len() {
+                self.ui.selected_item = None;
                 return;
             }
             
             // If it's a heading, don't select an item
-            if is_heading[self.selected_index] {
-                self.selected_item = None;
+            if is_heading[self.ui.selected_index] {
+                self.ui.selected_item = None;
                 return;
             }
             
             // Map display index to item index
-            if let Some(Some(item_idx)) = item_indices.get(self.selected_index) {
+            if let Some(Some(item_idx)) = item_indices.get(self.ui.selected_index) {
                 if let Some(item) = items.get(*item_idx) {
-                    self.selected_item = Some(match item {
+                    self.ui.selected_item = Some(match item {
                         Item::Task(task) => {
                             SelectedItem::Task(task.clone())
                         }
@@ -516,23 +663,23 @@ impl App {
                         }
                     });
                     // Only change mode to View if not in Search mode (navigation in search should keep search mode)
-                    if self.mode != Mode::Search {
-                        self.mode = Mode::View;
+                    if self.ui.mode != Mode::Search {
+                        self.ui.mode = Mode::View;
                     }
-                    self.item_view_scroll = 0;
+                    self.ui.item_view_scroll = 0;
                 } else {
-                    self.selected_item = None;
+                    self.ui.selected_item = None;
                 }
             } else {
-                self.selected_item = None;
+                self.ui.selected_item = None;
             }
         } else {
             // For non-grouped modes, use direct indexing
             if !items.is_empty() {
                 // Ensure selected_index is valid
                 // BUT: If we have a valid selected_item, try to find its index instead of resetting
-                if self.selected_index >= items.len() {
-                    if let Some(ref selected) = self.selected_item {
+                if self.ui.selected_index >= items.len() {
+                    if let Some(ref selected) = self.ui.selected_item {
                         // Try to find the selected item's index
                         let found_idx = items.iter().position(|item| {
                             match (item, selected) {
@@ -543,17 +690,17 @@ impl App {
                             }
                         });
                         if let Some(idx) = found_idx {
-                            self.selected_index = idx;
+                            self.ui.selected_index = idx;
                         } else {
-                            self.selected_index = 0;
+                            self.ui.selected_index = 0;
                         }
                     } else {
-                        self.selected_index = 0;
+                        self.ui.selected_index = 0;
                     }
                 }
                 
-                if let Some(item) = items.get(self.selected_index) {
-                    self.selected_item = Some(match item {
+                if let Some(item) = items.get(self.ui.selected_index) {
+                    self.ui.selected_item = Some(match item {
                         Item::Task(task) => {
                             SelectedItem::Task(task.clone())
                         }
@@ -565,64 +712,64 @@ impl App {
                         }
                     });
                     // Only change mode to View if not in Search mode (navigation in search should keep search mode)
-                    if self.mode != Mode::Search {
-                        self.mode = Mode::View;
+                    if self.ui.mode != Mode::Search {
+                        self.ui.mode = Mode::View;
                     }
                     // Reset scroll when selecting a new item
-                    self.item_view_scroll = 0;
+                    self.ui.item_view_scroll = 0;
                 }
             } else {
                 // No items available, clear selection
-                self.selected_item = None;
+                self.ui.selected_item = None;
             }
         }
     }
 
     pub fn adjust_selected_index(&mut self) {
-        if self.list_view_mode == ListViewMode::GroupedByTags {
+        if self.ui.list_view_mode == ListViewMode::GroupedByTags {
             let (is_heading, _) = self.get_display_index_mapping();
             let display_len = is_heading.len();
             
             if display_len == 0 {
-                self.selected_index = 0;
-                self.selected_item = None;
+                self.ui.selected_index = 0;
+                self.ui.selected_item = None;
             } else {
                 // Ensure we have a valid selection - if index is out of bounds, select first item
-                if self.selected_index >= display_len {
-                    self.selected_index = 0;
+                if self.ui.selected_index >= display_len {
+                    self.ui.selected_index = 0;
                 } else {
-                    self.selected_index = cmp::min(self.selected_index, display_len.saturating_sub(1));
+                    self.ui.selected_index = cmp::min(self.ui.selected_index, display_len.saturating_sub(1));
                 }
                 
                 // Skip headings - find the first non-heading item if current selection is a heading
-                if is_heading[self.selected_index] {
+                if is_heading[self.ui.selected_index] {
                     // Find the first non-heading item
                     let mut found = false;
                     for i in 0..display_len {
                         if !is_heading[i] {
-                            self.selected_index = i;
+                            self.ui.selected_index = i;
                             found = true;
                             break;
                         }
                     }
                     // If no non-heading items exist, clear selection
                     if !found {
-                        self.selected_index = 0;
-                        self.selected_item = None;
+                        self.ui.selected_index = 0;
+                        self.ui.selected_item = None;
                     }
                 }
             }
         } else {
             let items = self.get_current_items();
             if items.is_empty() {
-                self.selected_index = 0;
-                self.selected_item = None;
+                self.ui.selected_index = 0;
+                self.ui.selected_item = None;
             } else {
                 // Ensure we have a valid selection - if index is out of bounds, select first item
                 // BUT: If we have a valid selected_item, try to find its index instead of resetting
-                if self.selected_index >= items.len() {
+                if self.ui.selected_index >= items.len() {
                     // If we have a selected_item, try to find its index in the items list
-                    if let Some(ref selected) = self.selected_item {
+                    if let Some(ref selected) = self.ui.selected_item {
                         let found_idx = items.iter().position(|item| {
                             match (item, selected) {
                                 (Item::Task(t), SelectedItem::Task(st)) => t.id == st.id,
@@ -632,18 +779,18 @@ impl App {
                             }
                         });
                         if let Some(idx) = found_idx {
-                            self.selected_index = idx;
+                            self.ui.selected_index = idx;
                         } else {
                             // Couldn't find the item, reset to 0
-                            self.selected_index = 0;
+                            self.ui.selected_index = 0;
                         }
                     } else {
-                        self.selected_index = 0;
+                        self.ui.selected_index = 0;
                     }
-                } else if self.selected_index == 0 && self.selected_item.is_some() {
+                } else if self.ui.selected_index == 0 && self.ui.selected_item.is_some() {
                     // If selected_index is 0 but we have a selected_item, try to find its index
                     // This handles the case where selected_index was reset to 0 but we have the correct item
-                    if let Some(ref selected) = self.selected_item {
+                    if let Some(ref selected) = self.ui.selected_item {
                         let found_idx = items.iter().position(|item| {
                             match (item, selected) {
                                 (Item::Task(t), SelectedItem::Task(st)) => t.id == st.id,
@@ -653,11 +800,11 @@ impl App {
                             }
                         });
                         if let Some(idx) = found_idx {
-                            self.selected_index = idx;
+                            self.ui.selected_index = idx;
                         }
                     }
                 } else {
-                    self.selected_index = cmp::min(self.selected_index, items.len().saturating_sub(1));
+                    self.ui.selected_index = cmp::min(self.ui.selected_index, items.len().saturating_sub(1));
                 }
             }
         }
@@ -667,22 +814,22 @@ impl App {
 
     /// Sync ListState with selected_index for proper scrolling
     pub fn sync_list_state(&mut self) {
-        self.list_state.select(Some(self.selected_index));
+        self.ui.list_state.select(Some(self.ui.selected_index));
     }
 
     pub fn move_selection_up(&mut self) {
-        if self.list_view_mode == ListViewMode::GroupedByTags {
+        if self.ui.list_view_mode == ListViewMode::GroupedByTags {
             let (is_heading, _) = self.get_display_index_mapping();
             
             // Find the previous non-heading item
-            let mut new_index = self.selected_index;
+            let mut new_index = self.ui.selected_index;
             loop {
                 if new_index == 0 {
                     break;
                 }
                 new_index -= 1;
                 if !is_heading[new_index] {
-                    self.selected_index = new_index;
+                    self.ui.selected_index = new_index;
                     self.sync_list_state();
                     self.select_current_item();
                     return;
@@ -691,8 +838,8 @@ impl App {
             // If we couldn't find a non-heading item above, we're already at the top
             // Don't change selection - stay where we are
         } else {
-            if self.selected_index > 0 {
-                self.selected_index -= 1;
+            if self.ui.selected_index > 0 {
+                self.ui.selected_index -= 1;
                 self.sync_list_state();
                 // Auto-select the item when navigating
                 self.select_current_item();
@@ -701,34 +848,34 @@ impl App {
     }
 
     pub fn move_selection_down(&mut self) {
-        if self.list_view_mode == ListViewMode::GroupedByTags {
+        if self.ui.list_view_mode == ListViewMode::GroupedByTags {
             let (is_heading, _) = self.get_display_index_mapping();
             let display_len = is_heading.len();
             
             // Find the next non-heading item, or stop at the last item
-            let mut new_index = self.selected_index;
+            let mut new_index = self.ui.selected_index;
             loop {
                 if new_index >= display_len.saturating_sub(1) {
                     break;
                 }
                 new_index += 1;
                 if !is_heading[new_index] {
-                    self.selected_index = new_index;
+                    self.ui.selected_index = new_index;
                     self.sync_list_state();
                     self.select_current_item();
                     return;
                 }
             }
             // If we couldn't find a non-heading item, just move to the last index
-            if self.selected_index < display_len.saturating_sub(1) {
-                self.selected_index = display_len.saturating_sub(1);
+            if self.ui.selected_index < display_len.saturating_sub(1) {
+                self.ui.selected_index = display_len.saturating_sub(1);
                 self.sync_list_state();
                 self.select_current_item();
             }
         } else {
             let items = self.get_current_items();
-            if self.selected_index < items.len().saturating_sub(1) {
-                self.selected_index += 1;
+            if self.ui.selected_index < items.len().saturating_sub(1) {
+                self.ui.selected_index += 1;
                 self.sync_list_state();
                 // Auto-select the item when navigating
                 self.select_current_item();
@@ -737,21 +884,21 @@ impl App {
     }
 
     pub fn toggle_sidebar(&mut self) {
-        self.sidebar_state = match self.sidebar_state {
+        self.ui.sidebar_state = match self.ui.sidebar_state {
             SidebarState::Expanded => SidebarState::Collapsed,
             SidebarState::Collapsed => SidebarState::Expanded,
         };
     }
 
     pub fn toggle_list_view_mode(&mut self) {
-        self.list_view_mode = match self.list_view_mode {
+        self.ui.list_view_mode = match self.ui.list_view_mode {
             ListViewMode::Simple => ListViewMode::TwoLine,
             ListViewMode::TwoLine => ListViewMode::GroupedByTags,
             ListViewMode::GroupedByTags => ListViewMode::Simple,
         };
         
         // Save to config
-        let mode_str = match self.list_view_mode {
+        let mode_str = match self.ui.list_view_mode {
             ListViewMode::Simple => "Simple",
             ListViewMode::TwoLine => "TwoLine",
             ListViewMode::GroupedByTags => "GroupedByTags",
@@ -769,8 +916,8 @@ impl App {
 
     /// Switch to a new tab and auto-select the first item if available
     pub fn switch_tab(&mut self, new_tab: Tab) {
-        self.current_tab = new_tab;
-        self.selected_index = 0;
+        self.ui.current_tab = new_tab;
+        self.ui.selected_index = 0;
         self.adjust_selected_index();
         
         // Auto-select the first item if available
@@ -778,26 +925,26 @@ impl App {
         // so we need to clear it to avoid showing items from other tabs
         let items = self.get_current_items();
         if items.is_empty() {
-            self.selected_item = None;
+            self.ui.selected_item = None;
         } else {
             self.select_current_item();
         }
     }
 
     pub fn set_status_message(&mut self, message: String) {
-        self.status_message = Some(message);
-        self.status_message_time = Some(Instant::now());
+        self.status.message = Some(message);
+        self.status.message_time = Some(Instant::now());
     }
 
     pub fn clear_status_message(&mut self) {
-        self.status_message = None;
-        self.status_message_time = None;
+        self.status.message = None;
+        self.status.message_time = None;
     }
 
     /// Check if status message should be auto-cleared (after 3 seconds)
     pub fn check_status_message_timeout(&mut self) {
         const STATUS_MESSAGE_TIMEOUT_SECS: u64 = 3;
-        if let Some(time) = self.status_message_time {
+        if let Some(time) = self.status.message_time {
             if time.elapsed().as_secs() >= STATUS_MESSAGE_TIMEOUT_SECS {
                 self.clear_status_message();
             }
@@ -805,14 +952,14 @@ impl App {
     }
 
     pub fn enter_search_mode(&mut self) {
-        self.mode = Mode::Search;
-        self.search_query.clear();
+        self.ui.mode = Mode::Search;
+        self.search.query.clear();
     }
 
     pub fn exit_search_mode(&mut self) {
         // Get selected item ID - prefer using selected_item if available (from navigation),
         // otherwise use selected_index to look it up from filtered list
-        let selected_item_id = if let Some(ref selected) = self.selected_item {
+        let selected_item_id = if let Some(ref selected) = self.ui.selected_item {
             // Use already-selected item if available
             match selected {
                 SelectedItem::Task(t) => t.id.map(|id| ("Task", id)),
@@ -822,8 +969,8 @@ impl App {
         } else {
             // Fall back to looking up by selected_index in filtered list
             let filtered_items = self.get_current_items();
-            if !filtered_items.is_empty() && self.selected_index < filtered_items.len() {
-                if let Some(item) = filtered_items.get(self.selected_index) {
+            if !filtered_items.is_empty() && self.ui.selected_index < filtered_items.len() {
+                if let Some(item) = filtered_items.get(self.ui.selected_index) {
                     match item {
                         Item::Task(t) => t.id.map(|id| ("Task", id)),
                         Item::Note(n) => n.id.map(|id| ("Note", id)),
@@ -837,8 +984,8 @@ impl App {
             }
         };
         
-        self.mode = Mode::View;
-        self.search_query.clear();
+        self.ui.mode = Mode::View;
+        self.search.query.clear();
         
         // Map selected_index from filtered list to full list
         if let Some((item_type, item_id)) = selected_item_id {
@@ -853,18 +1000,18 @@ impl App {
             });
             
             if let Some(item_idx) = new_item_index {
-                if self.list_view_mode == ListViewMode::GroupedByTags {
+                if self.ui.list_view_mode == ListViewMode::GroupedByTags {
                     // In GroupedByTags mode, we need to find the display index that corresponds to this item index
                     let (_, item_indices) = self.get_display_index_mapping();
                     if let Some(display_idx) = item_indices.iter().position(|&idx_opt| idx_opt == Some(item_idx)) {
-                        self.selected_index = display_idx;
+                        self.ui.selected_index = display_idx;
                     } else {
                         // Fallback: set to 0 if we can't find the display index
-                        self.selected_index = 0;
+                        self.ui.selected_index = 0;
                     }
                 } else {
                     // For non-grouped modes, item index is the same as display index
-                    self.selected_index = item_idx;
+                    self.ui.selected_index = item_idx;
                 }
             }
         }
@@ -877,26 +1024,26 @@ impl App {
     }
 
     pub fn enter_filter_mode(&mut self) {
-        self.mode = Mode::Filter;
+        self.ui.mode = Mode::Filter;
         // Initialize filter form state with current filter values
-        let tags_str = self.filter_tags.clone().unwrap_or_default();
-        let archived_index = match self.filter_archived {
+        let tags_str = self.filter.tags.clone().unwrap_or_default();
+        let archived_index = match self.filter.archived {
             Some(FilterArchivedStatus::Active) => 0,
             Some(FilterArchivedStatus::Archived) => 1,
             Some(FilterArchivedStatus::All) => 2,
             None => 0,
         };
-        let status_index = match self.filter_task_status {
+        let status_index = match self.filter.task_status {
             Some(FilterTaskStatus::Todo) => 0,
             Some(FilterTaskStatus::Done) => 1,
             Some(FilterTaskStatus::All) => 2,
             None => 2, // Default to All if not set
         };
-        let tag_logic_index = match self.filter_tag_logic {
+        let tag_logic_index = match self.filter.tag_logic {
             FilterTagLogic::And => 0,
             FilterTagLogic::Or => 1,
         };
-        self.filter_mode_state = Some(FilterFormState {
+        self.filter.form_state = Some(FilterFormState {
             current_field: FilterFormField::Tags,
             tags: Editor::from_string(tags_str),
             archived_index,
@@ -906,26 +1053,26 @@ impl App {
     }
 
     pub fn exit_filter_mode(&mut self) {
-        self.mode = Mode::View;
-        self.filter_mode_state = None;
+        self.ui.mode = Mode::View;
+        self.filter.form_state = None;
     }
 
     pub fn apply_filters(&mut self) {
-        if let Some(ref state) = self.filter_mode_state {
+        if let Some(ref state) = self.filter.form_state {
             // Apply tags filter
             let tags_content = if state.tags.lines.is_empty() {
                 String::new()
             } else {
                 state.tags.lines[0].clone()
             };
-            self.filter_tags = if tags_content.trim().is_empty() {
+            self.filter.tags = if tags_content.trim().is_empty() {
                 None
             } else {
                 Some(tags_content.trim().to_string())
             };
 
             // Apply archived filter
-            self.filter_archived = match state.archived_index {
+            self.filter.archived = match state.archived_index {
                 0 => Some(FilterArchivedStatus::Active),
                 1 => Some(FilterArchivedStatus::Archived),
                 2 => Some(FilterArchivedStatus::All),
@@ -933,15 +1080,15 @@ impl App {
             };
 
             // Apply tag logic
-            self.filter_tag_logic = match state.tag_logic_index {
+            self.filter.tag_logic = match state.tag_logic_index {
                 0 => FilterTagLogic::And,
                 1 => FilterTagLogic::Or,
                 _ => FilterTagLogic::And,
             };
 
             // Apply task status filter (only relevant for Tasks tab)
-            if self.current_tab == Tab::Tasks {
-                self.filter_task_status = match state.status_index {
+            if self.ui.current_tab == Tab::Tasks {
+                self.filter.task_status = match state.status_index {
                     0 => Some(FilterTaskStatus::Todo),
                     1 => Some(FilterTaskStatus::Done),
                     2 => Some(FilterTaskStatus::All),
@@ -949,18 +1096,18 @@ impl App {
                 };
             } else {
                 // Clear task status filter when not on Tasks tab
-                self.filter_task_status = None;
+                self.filter.task_status = None;
             }
 
             // Reload data if needed (to get archived items)
-            if let Some(FilterArchivedStatus::Archived) | Some(FilterArchivedStatus::All) = self.filter_archived {
+            if let Some(FilterArchivedStatus::Archived) | Some(FilterArchivedStatus::All) = self.filter.archived {
                 if let Err(e) = self.load_data() {
                     self.set_status_message(format!("Failed to reload data: {}", e));
                 }
             }
 
             // Reset selection and update display
-            self.selected_index = 0;
+            self.ui.selected_index = 0;
             self.adjust_selected_index();
             self.select_current_item();
             self.set_status_message("Filters applied".to_string());
@@ -969,14 +1116,14 @@ impl App {
     }
 
     pub fn clear_filters(&mut self) {
-        self.filter_tags = None;
-        self.filter_archived = Some(FilterArchivedStatus::Active);
-        self.filter_task_status = None;
+        self.filter.tags = None;
+        self.filter.archived = Some(FilterArchivedStatus::Active);
+        self.filter.task_status = None;
         // Reload data to get only active items
         if let Err(e) = self.load_data() {
             self.set_status_message(format!("Failed to reload data: {}", e));
         } else {
-            self.selected_index = 0;
+            self.ui.selected_index = 0;
             self.adjust_selected_index();
             self.select_current_item();
             self.set_status_message("Filters cleared".to_string());
@@ -986,13 +1133,13 @@ impl App {
     pub fn get_filter_summary(&self) -> String {
         let mut parts = Vec::new();
         
-        if let Some(ref tags) = self.filter_tags {
+        if let Some(ref tags) = self.filter.tags {
             if !tags.trim().is_empty() {
                 parts.push(format!("Tags: {}", tags));
             }
         }
         
-        if let Some(archived) = self.filter_archived {
+        if let Some(archived) = self.filter.archived {
             let archived_str = match archived {
                 FilterArchivedStatus::Active => "Active",
                 FilterArchivedStatus::Archived => "Archived",
@@ -1001,7 +1148,7 @@ impl App {
             parts.push(format!("Archived: {}", archived_str));
         }
         
-        if let Some(status) = self.filter_task_status {
+        if let Some(status) = self.filter.task_status {
             let status_str = match status {
                 FilterTaskStatus::Todo => "Todo",
                 FilterTaskStatus::Done => "Done",
@@ -1010,11 +1157,11 @@ impl App {
             parts.push(format!("Status: {}", status_str));
         }
         
-        let logic_str = match self.filter_tag_logic {
+        let logic_str = match self.filter.tag_logic {
             FilterTagLogic::And => "AND",
             FilterTagLogic::Or => "OR",
         };
-        if self.filter_tags.is_some() {
+        if self.filter.tags.is_some() {
             parts.push(format!("Logic: {}", logic_str));
         }
         
@@ -1026,7 +1173,7 @@ impl App {
     }
 
     pub fn navigate_filter_field(&mut self, forward: bool) {
-        if let Some(ref mut state) = self.filter_mode_state {
+        if let Some(ref mut state) = self.filter.form_state {
             // Build fields list - include Status only when on Tasks tab
             let mut fields = vec![
                 FilterFormField::Tags,
@@ -1034,7 +1181,7 @@ impl App {
             ];
             
             // Add Status field only for Tasks tab
-            if self.current_tab == Tab::Tasks {
+            if self.ui.current_tab == Tab::Tasks {
                 fields.push(FilterFormField::Status);
             }
             
@@ -1060,7 +1207,7 @@ impl App {
     }
 
     pub fn get_current_filter_editor(&mut self) -> Option<&mut Editor> {
-        if let Some(ref mut state) = self.filter_mode_state {
+        if let Some(ref mut state) = self.filter.form_state {
             if matches!(state.current_field, FilterFormField::Tags) {
                 Some(&mut state.tags)
             } else {
@@ -1072,7 +1219,7 @@ impl App {
     }
 
     pub fn is_filter_tags_field_active(&self) -> bool {
-        if let Some(ref state) = self.filter_mode_state {
+        if let Some(ref state) = self.filter.form_state {
             matches!(state.current_field, FilterFormField::Tags)
         } else {
             false
@@ -1080,7 +1227,7 @@ impl App {
     }
 
     pub fn move_filter_archived_up(&mut self) {
-        if let Some(ref mut state) = self.filter_mode_state {
+        if let Some(ref mut state) = self.filter.form_state {
             if state.archived_index > 0 {
                 state.archived_index -= 1;
             }
@@ -1088,7 +1235,7 @@ impl App {
     }
 
     pub fn move_filter_archived_down(&mut self) {
-        if let Some(ref mut state) = self.filter_mode_state {
+        if let Some(ref mut state) = self.filter.form_state {
             if state.archived_index < 2 {
                 state.archived_index += 1;
             }
@@ -1096,7 +1243,7 @@ impl App {
     }
 
     pub fn move_filter_tag_logic_up(&mut self) {
-        if let Some(ref mut state) = self.filter_mode_state {
+        if let Some(ref mut state) = self.filter.form_state {
             if state.tag_logic_index > 0 {
                 state.tag_logic_index -= 1;
             }
@@ -1104,7 +1251,7 @@ impl App {
     }
 
     pub fn move_filter_tag_logic_down(&mut self) {
-        if let Some(ref mut state) = self.filter_mode_state {
+        if let Some(ref mut state) = self.filter.form_state {
             if state.tag_logic_index < 1 {
                 state.tag_logic_index += 1;
             }
@@ -1112,7 +1259,7 @@ impl App {
     }
 
     pub fn move_filter_status_up(&mut self) {
-        if let Some(ref mut state) = self.filter_mode_state {
+        if let Some(ref mut state) = self.filter.form_state {
             if state.status_index > 0 {
                 state.status_index -= 1;
             }
@@ -1120,7 +1267,7 @@ impl App {
     }
 
     pub fn move_filter_status_down(&mut self) {
-        if let Some(ref mut state) = self.filter_mode_state {
+        if let Some(ref mut state) = self.filter.form_state {
             if state.status_index < 2 {
                 state.status_index += 1;
             }
@@ -1128,44 +1275,44 @@ impl App {
     }
 
     pub fn enter_help_mode(&mut self) {
-        self.mode = Mode::Help;
+        self.ui.mode = Mode::Help;
     }
 
     pub fn exit_help_mode(&mut self) {
-        self.mode = Mode::View;
+        self.ui.mode = Mode::View;
     }
 
     pub fn enter_markdown_help_mode(&mut self) {
-        self.mode = Mode::MarkdownHelp;
+        self.ui.mode = Mode::MarkdownHelp;
         // Reset scroll positions when entering markdown help
-        self.markdown_help_example_scroll = 0;
-        self.markdown_help_rendered_scroll = 0;
+        self.ui.markdown_help_example_scroll = 0;
+        self.ui.markdown_help_rendered_scroll = 0;
     }
 
     pub fn exit_markdown_help_mode(&mut self) {
         // Return to Create mode when exiting markdown help
-        self.mode = Mode::Create;
+        self.ui.mode = Mode::Create;
     }
 
     pub fn enter_settings_mode(&mut self) {
-        self.mode = Mode::Settings;
+        self.ui.mode = Mode::Settings;
         self.init_settings_state();
     }
 
     /// Move settings category selection up
     pub fn move_settings_category_up(&mut self) {
-        if self.settings_category_index > 0 {
-            self.settings_category_index -= 1;
-            self.settings_list_state.select(Some(self.settings_category_index));
+        if self.settings.category_index > 0 {
+            self.settings.category_index -= 1;
+            self.settings.list_state.select(Some(self.settings.category_index));
         }
     }
 
     /// Move settings category selection down
     pub fn move_settings_category_down(&mut self) {
         let categories = self.get_settings_categories();
-        if self.settings_category_index < categories.len().saturating_sub(1) {
-            self.settings_category_index += 1;
-            self.settings_list_state.select(Some(self.settings_category_index));
+        if self.settings.category_index < categories.len().saturating_sub(1) {
+            self.settings.category_index += 1;
+            self.settings.list_state.select(Some(self.settings.category_index));
         }
     }
 
@@ -1176,23 +1323,23 @@ impl App {
 
     /// Move sidebar width selection up
     pub fn move_settings_sidebar_width_up(&mut self) {
-        if self.settings_sidebar_width_index > 0 {
-            self.settings_sidebar_width_index -= 1;
+        if self.settings.sidebar_width_index > 0 {
+            self.settings.sidebar_width_index -= 1;
         }
     }
 
     /// Move sidebar width selection down
     pub fn move_settings_sidebar_width_down(&mut self) {
         let options = self.get_sidebar_width_options();
-        if self.settings_sidebar_width_index < options.len().saturating_sub(1) {
-            self.settings_sidebar_width_index += 1;
+        if self.settings.sidebar_width_index < options.len().saturating_sub(1) {
+            self.settings.sidebar_width_index += 1;
         }
     }
 
     /// Apply selected sidebar width
     pub fn apply_sidebar_width(&mut self) -> Result<(), crate::config::ConfigError> {
         let options = self.get_sidebar_width_options();
-        if let Some(&width) = options.get(self.settings_sidebar_width_index) {
+        if let Some(&width) = options.get(self.settings.sidebar_width_index) {
             self.config.sidebar_width_percent = width;
             self.config.save()?;
             self.set_status_message(format!("Sidebar width set to {}%", width));
@@ -1207,23 +1354,23 @@ impl App {
 
     /// Move display mode selection up
     pub fn move_settings_display_mode_up(&mut self) {
-        if self.settings_display_mode_index > 0 {
-            self.settings_display_mode_index -= 1;
+        if self.settings.display_mode_index > 0 {
+            self.settings.display_mode_index -= 1;
         }
     }
 
     /// Move display mode selection down
     pub fn move_settings_display_mode_down(&mut self) {
         let options = self.get_display_mode_options();
-        if self.settings_display_mode_index < options.len().saturating_sub(1) {
-            self.settings_display_mode_index += 1;
+        if self.settings.display_mode_index < options.len().saturating_sub(1) {
+            self.settings.display_mode_index += 1;
         }
     }
 
     /// Apply selected display mode
     pub fn apply_display_mode(&mut self) -> Result<(), crate::config::ConfigError> {
         let options = self.get_display_mode_options();
-        if let Some(&mode_str) = options.get(self.settings_display_mode_index) {
+        if let Some(&mode_str) = options.get(self.settings.display_mode_index) {
             let new_mode = match mode_str {
                 "Simple" => ListViewMode::Simple,
                 "TwoLine" => ListViewMode::TwoLine,
@@ -1231,7 +1378,7 @@ impl App {
                 _ => return Ok(()), // Invalid mode, do nothing
             };
             
-            self.list_view_mode = new_mode;
+            self.ui.list_view_mode = new_mode;
             self.config.list_view_mode = mode_str.to_string();
             // Determine profile based on database path (same logic as get_config_file_path)
             let db_path = self.config.get_database_path();
@@ -1253,25 +1400,25 @@ impl App {
     }
 
     pub fn exit_settings_mode(&mut self) {
-        self.mode = Mode::View;
+        self.ui.mode = Mode::View;
     }
 
     pub fn add_to_search(&mut self, ch: char) {
-        self.search_query.push(ch);
-        self.selected_index = 0; // Reset to top when searching
+        self.search.query.push(ch);
+        self.ui.selected_index = 0; // Reset to top when searching
         self.sync_list_state();
     }
 
     pub fn remove_from_search(&mut self) {
-        self.search_query.pop();
-        self.selected_index = 0; // Reset to top when searching
+        self.search.query.pop();
+        self.ui.selected_index = 0; // Reset to top when searching
         self.sync_list_state();
     }
 
     pub fn enter_edit_mode(&mut self) {
         // Use form-based editing instead of single-field editing
         // Populate form with existing item data
-        if let Some(ref item) = self.selected_item {
+        if let Some(ref item) = self.ui.selected_item {
             let form = match item {
                 SelectedItem::Task(task) => {
                     let notebook_id = task.notebook_id;
@@ -1315,8 +1462,8 @@ impl App {
                     })
                 }
             };
-            self.create_form = Some(form);
-            self.mode = Mode::Create; // Use Create mode for form-based editing
+            self.form.create_form = Some(form);
+            self.ui.mode = Mode::Create; // Use Create mode for form-based editing
         } else {
             self.set_status_message("No item selected".to_string());
         }
@@ -1324,9 +1471,9 @@ impl App {
 
 
     pub fn enter_create_mode(&mut self) {
-        let notebook_id = self.current_notebook_id;
+        let notebook_id = self.notebooks.current_notebook_id;
         let notebook_selected_index = self.get_notebook_index_for_id(notebook_id);
-        let form = match self.current_tab {
+        let form = match self.ui.current_tab {
             Tab::Tasks => {
                 CreateForm::Task(TaskForm {
                     current_field: TaskField::Title,
@@ -1365,14 +1512,14 @@ impl App {
                 })
             }
         };
-        self.create_form = Some(form);
-        self.mode = Mode::Create;
+        self.form.create_form = Some(form);
+        self.ui.mode = Mode::Create;
     }
 
     /// Get notebook index for a given notebook_id (0 = "[None]", 1+ = actual notebooks)
     fn get_notebook_index_for_id(&self, notebook_id: Option<i64>) -> usize {
         if let Some(nb_id) = notebook_id {
-            self.notebooks
+            self.notebooks.notebooks
                 .iter()
                 .position(|n| n.id == Some(nb_id))
                 .map(|idx| idx + 1) // +1 because "[None]" is at index 0
@@ -1383,12 +1530,12 @@ impl App {
     }
 
     pub fn exit_create_mode(&mut self) {
-        self.create_form = None;
-        self.mode = Mode::View;
+        self.form.create_form = None;
+        self.ui.mode = Mode::View;
     }
 
     pub fn navigate_form_field(&mut self, forward: bool) {
-        if let Some(ref mut form) = self.create_form {
+        if let Some(ref mut form) = self.form.create_form {
             match form {
                 CreateForm::Task(task_form) => {
                     let current = task_form.current_field;
@@ -1438,7 +1585,7 @@ impl App {
     }
 
     pub fn get_current_form_editor(&mut self) -> Option<&mut Editor> {
-        if let Some(ref mut form) = self.create_form {
+        if let Some(ref mut form) = self.form.create_form {
             match form {
                 CreateForm::Task(task_form) => {
                     match task_form.current_field {
@@ -1473,7 +1620,7 @@ impl App {
     }
 
     pub fn is_content_field_active(&self) -> bool {
-        if let Some(ref form) = self.create_form {
+        if let Some(ref form) = self.form.create_form {
             match form {
                 CreateForm::Note(note_form) => note_form.current_field == NoteField::Content,
                 CreateForm::Journal(journal_form) => journal_form.current_field == JournalField::Content,
@@ -1485,7 +1632,7 @@ impl App {
     }
 
     pub fn is_notebook_field_active(&self) -> bool {
-        if let Some(ref form) = self.create_form {
+        if let Some(ref form) = self.form.create_form {
             match form {
                 CreateForm::Task(task_form) => task_form.current_field == TaskField::Notebook,
                 CreateForm::Note(note_form) => note_form.current_field == NoteField::Notebook,
@@ -1533,7 +1680,7 @@ impl App {
     }
 
     pub fn save_create_form(&mut self) -> Result<(), DatabaseError> {
-        if let Some(ref form) = self.create_form {
+        if let Some(ref form) = self.form.create_form {
             match form {
                 CreateForm::Task(task_form) => {
                     // Validate
@@ -1571,7 +1718,7 @@ impl App {
                             
                             // Refresh selected item
                             if let Some(updated_task) = self.tasks.iter().find(|t| t.id == Some(item_id)) {
-                                self.selected_item = Some(SelectedItem::Task(updated_task.clone()));
+                                self.ui.selected_item = Some(SelectedItem::Task(updated_task.clone()));
                             }
                             self.set_status_message("Task updated".to_string());
                         } else {
@@ -1607,10 +1754,10 @@ impl App {
                         
                         // Find and select the newly created task
                         if let Some(new_task_index) = self.tasks.iter().position(|t| t.id == Some(task_id)) {
-                            self.selected_index = new_task_index;
+                            self.ui.selected_index = new_task_index;
                             self.sync_list_state();
                             if let Some(new_task) = self.tasks.get(new_task_index) {
-                                self.selected_item = Some(SelectedItem::Task(new_task.clone()));
+                                self.ui.selected_item = Some(SelectedItem::Task(new_task.clone()));
                             }
                         } else {
                             // If we can't find it, just ensure something is selected
@@ -1656,7 +1803,7 @@ impl App {
                             
                             // Refresh selected item
                             if let Some(updated_note) = self.notes.iter().find(|n| n.id == Some(item_id)) {
-                                self.selected_item = Some(SelectedItem::Note(updated_note.clone()));
+                                self.ui.selected_item = Some(SelectedItem::Note(updated_note.clone()));
                             }
                             self.set_status_message("Note updated".to_string());
                         } else {
@@ -1721,7 +1868,7 @@ impl App {
                             
                             // Refresh selected item
                             if let Some(updated_journal) = self.journals.iter().find(|j| j.id == Some(item_id)) {
-                                self.selected_item = Some(SelectedItem::Journal(updated_journal.clone()));
+                                self.ui.selected_item = Some(SelectedItem::Journal(updated_journal.clone()));
                             }
                             self.set_status_message("Journal entry updated".to_string());
                         } else {
@@ -1760,7 +1907,7 @@ impl App {
     /// This is a simplified version that doesn't account for wrapping - actual wrapping
     /// happens in render. This is just for approximate scroll calculations.
     fn get_item_view_total_lines(&self) -> usize {
-        if let Some(ref item) = self.selected_item {
+        if let Some(ref item) = self.ui.selected_item {
             match item {
                 SelectedItem::Task(task) => {
                     let mut count = 2; // Title, Status
@@ -1809,23 +1956,23 @@ impl App {
 
     /// Scroll item view content up by one line
     pub fn scroll_item_view_up(&mut self) {
-        if self.item_view_scroll > 0 {
-            self.item_view_scroll -= 1;
+        if self.ui.item_view_scroll > 0 {
+            self.ui.item_view_scroll -= 1;
         }
     }
 
     /// Scroll item view content down by one line
     pub fn scroll_item_view_down(&mut self) {
         // Just increment - render will clamp it appropriately
-        self.item_view_scroll += 1;
+        self.ui.item_view_scroll += 1;
     }
 
     /// Scroll item view content up by one page (viewport height)
     pub fn scroll_item_view_page_up(&mut self, viewport_height: usize) {
-        if self.item_view_scroll >= viewport_height {
-            self.item_view_scroll -= viewport_height;
+        if self.ui.item_view_scroll >= viewport_height {
+            self.ui.item_view_scroll -= viewport_height;
         } else {
-            self.item_view_scroll = 0;
+            self.ui.item_view_scroll = 0;
         }
     }
 
@@ -1833,83 +1980,83 @@ impl App {
     pub fn scroll_item_view_page_down(&mut self, viewport_height: usize) {
         let total_lines = self.get_item_view_total_lines();
         let max_scroll = total_lines.saturating_sub(viewport_height);
-        if self.item_view_scroll + viewport_height <= max_scroll {
-            self.item_view_scroll += viewport_height;
+        if self.ui.item_view_scroll + viewport_height <= max_scroll {
+            self.ui.item_view_scroll += viewport_height;
         } else {
-            self.item_view_scroll = max_scroll;
+            self.ui.item_view_scroll = max_scroll;
         }
     }
 
     /// Scroll item view content to top
     pub fn scroll_item_view_to_top(&mut self) {
-        self.item_view_scroll = 0;
+        self.ui.item_view_scroll = 0;
     }
 
     /// Scroll item view content to bottom
     pub fn scroll_item_view_to_bottom(&mut self, viewport_height: usize) {
         let total_lines = self.get_item_view_total_lines();
-        self.item_view_scroll = total_lines.saturating_sub(viewport_height);
+        self.ui.item_view_scroll = total_lines.saturating_sub(viewport_height);
     }
 
     /// Scroll markdown help example panel up by one line
     pub fn scroll_markdown_help_example_up(&mut self) {
-        if self.markdown_help_example_scroll > 0 {
-            self.markdown_help_example_scroll -= 1;
+        if self.ui.markdown_help_example_scroll > 0 {
+            self.ui.markdown_help_example_scroll -= 1;
         }
     }
 
     /// Scroll markdown help example panel down by one line
     pub fn scroll_markdown_help_example_down(&mut self) {
-        self.markdown_help_example_scroll += 1;
+        self.ui.markdown_help_example_scroll += 1;
     }
 
     /// Scroll markdown help rendered panel up by one line
     pub fn scroll_markdown_help_rendered_up(&mut self) {
-        if self.markdown_help_rendered_scroll > 0 {
-            self.markdown_help_rendered_scroll -= 1;
+        if self.ui.markdown_help_rendered_scroll > 0 {
+            self.ui.markdown_help_rendered_scroll -= 1;
         }
     }
 
     /// Scroll markdown help rendered panel down by one line
     pub fn scroll_markdown_help_rendered_down(&mut self) {
-        self.markdown_help_rendered_scroll += 1;
+        self.ui.markdown_help_rendered_scroll += 1;
     }
 
     /// Scroll markdown help example panel up by one page
     pub fn scroll_markdown_help_example_page_up(&mut self, viewport_height: usize) {
-        if self.markdown_help_example_scroll >= viewport_height {
-            self.markdown_help_example_scroll -= viewport_height;
+        if self.ui.markdown_help_example_scroll >= viewport_height {
+            self.ui.markdown_help_example_scroll -= viewport_height;
         } else {
-            self.markdown_help_example_scroll = 0;
+            self.ui.markdown_help_example_scroll = 0;
         }
     }
 
     /// Scroll markdown help example panel down by one page
     pub fn scroll_markdown_help_example_page_down(&mut self, viewport_height: usize, total_lines: usize) {
         let max_scroll = total_lines.saturating_sub(viewport_height);
-        if self.markdown_help_example_scroll + viewport_height <= max_scroll {
-            self.markdown_help_example_scroll += viewport_height;
+        if self.ui.markdown_help_example_scroll + viewport_height <= max_scroll {
+            self.ui.markdown_help_example_scroll += viewport_height;
         } else {
-            self.markdown_help_example_scroll = max_scroll;
+            self.ui.markdown_help_example_scroll = max_scroll;
         }
     }
 
     /// Scroll markdown help rendered panel up by one page
     pub fn scroll_markdown_help_rendered_page_up(&mut self, viewport_height: usize) {
-        if self.markdown_help_rendered_scroll >= viewport_height {
-            self.markdown_help_rendered_scroll -= viewport_height;
+        if self.ui.markdown_help_rendered_scroll >= viewport_height {
+            self.ui.markdown_help_rendered_scroll -= viewport_height;
         } else {
-            self.markdown_help_rendered_scroll = 0;
+            self.ui.markdown_help_rendered_scroll = 0;
         }
     }
 
     /// Scroll markdown help rendered panel down by one page
     pub fn scroll_markdown_help_rendered_page_down(&mut self, viewport_height: usize, total_lines: usize) {
         let max_scroll = total_lines.saturating_sub(viewport_height);
-        if self.markdown_help_rendered_scroll + viewport_height <= max_scroll {
-            self.markdown_help_rendered_scroll += viewport_height;
+        if self.ui.markdown_help_rendered_scroll + viewport_height <= max_scroll {
+            self.ui.markdown_help_rendered_scroll += viewport_height;
         } else {
-            self.markdown_help_rendered_scroll = max_scroll;
+            self.ui.markdown_help_rendered_scroll = max_scroll;
         }
     }
 
@@ -1947,18 +2094,18 @@ impl App {
 
     /// Move settings theme selection up
     pub fn move_settings_theme_selection_up(&mut self) {
-        if self.settings_theme_index > 0 {
-            self.settings_theme_index -= 1;
-            self.settings_theme_list_state.select(Some(self.settings_theme_index));
+        if self.settings.theme_index > 0 {
+            self.settings.theme_index -= 1;
+            self.settings.theme_list_state.select(Some(self.settings.theme_index));
         }
     }
 
     /// Move settings theme selection down
     pub fn move_settings_theme_selection_down(&mut self) {
         let themes = self.get_available_themes();
-        if self.settings_theme_index < themes.len().saturating_sub(1) {
-            self.settings_theme_index += 1;
-            self.settings_theme_list_state.select(Some(self.settings_theme_index));
+        if self.settings.theme_index < themes.len().saturating_sub(1) {
+            self.settings.theme_index += 1;
+            self.settings.theme_list_state.select(Some(self.settings.theme_index));
         }
     }
 
@@ -1970,8 +2117,8 @@ impl App {
         // Update theme index to match current theme
         let themes = self.get_available_themes();
         if let Some(index) = themes.iter().position(|t| t == theme_name) {
-            self.settings_theme_index = index;
-            self.settings_theme_list_state.select(Some(index));
+            self.settings.theme_index = index;
+            self.settings.theme_list_state.select(Some(index));
         }
         
         self.set_status_message(format!("Theme changed to: {}", theme_name));
@@ -1982,12 +2129,12 @@ impl App {
     /// Only works when on Tasks tab with a task selected
     pub fn toggle_task_status(&mut self) -> Result<(), DatabaseError> {
         // Only work on Tasks tab
-        if self.current_tab != Tab::Tasks {
+        if self.ui.current_tab != Tab::Tasks {
             return Ok(());
         }
 
         // Check if a task is selected
-        if let Some(SelectedItem::Task(task)) = &self.selected_item {
+        if let Some(SelectedItem::Task(task)) = &self.ui.selected_item {
             if let Some(task_id) = task.id {
                 // Find the task in the list
                 if let Some(ref mut task) = self.tasks.iter_mut().find(|t| t.id == Some(task_id)) {
@@ -2010,7 +2157,7 @@ impl App {
                     
                     // Refresh selected item
                     if let Some(updated_task) = self.tasks.iter().find(|t| t.id == Some(task_id)) {
-                        self.selected_item = Some(SelectedItem::Task(updated_task.clone()));
+                        self.ui.selected_item = Some(SelectedItem::Task(updated_task.clone()));
                     }
                     
                     let status_msg = if !was_done {
@@ -2030,26 +2177,26 @@ impl App {
     /// Only works when on Tasks tab with a task selected
     pub fn reorder_task_up(&mut self) -> Result<(), DatabaseError> {
         // Only work on Tasks tab
-        if self.current_tab != Tab::Tasks {
+        if self.ui.current_tab != Tab::Tasks {
             return Ok(());
         }
 
         // Check if we have a valid selection
-        if self.selected_index == 0 {
+        if self.ui.selected_index == 0 {
             // Already at the top
             return Ok(());
         }
 
         let items = self.get_current_items();
-        if items.is_empty() || self.selected_index >= items.len() {
+        if items.is_empty() || self.ui.selected_index >= items.len() {
             return Ok(());
         }
 
         // Get the selected task
-        if let Some(SelectedItem::Task(selected_task)) = &self.selected_item {
+        if let Some(SelectedItem::Task(selected_task)) = &self.ui.selected_item {
             if let Some(selected_task_id) = selected_task.id {
                 // Find the task above
-                let above_index = self.selected_index - 1;
+                let above_index = self.ui.selected_index - 1;
                 if let Some(Item::Task(above_task)) = items.get(above_index) {
                     if let Some(above_task_id) = above_task.id {
                         // Get the actual tasks from the list
@@ -2070,12 +2217,12 @@ impl App {
 
                             // Find the new index of the selected task (it moved up one position)
                             if let Some(new_index) = self.tasks.iter().position(|t| t.id == Some(selected_task_id)) {
-                                self.selected_index = new_index;
+                                self.ui.selected_index = new_index;
                                 self.sync_list_state();
                                 
                                 // Refresh selected item
                                 if let Some(updated_task) = self.tasks.get(new_index) {
-                                    self.selected_item = Some(SelectedItem::Task(updated_task.clone()));
+                                    self.ui.selected_item = Some(SelectedItem::Task(updated_task.clone()));
                                 }
                             }
 
@@ -2093,7 +2240,7 @@ impl App {
     /// Only works when on Tasks tab with a task selected
     pub fn reorder_task_down(&mut self) -> Result<(), DatabaseError> {
         // Only work on Tasks tab
-        if self.current_tab != Tab::Tasks {
+        if self.ui.current_tab != Tab::Tasks {
             return Ok(());
         }
 
@@ -2103,16 +2250,16 @@ impl App {
         }
 
         // Check if we have a valid selection
-        if self.selected_index >= items.len().saturating_sub(1) {
+        if self.ui.selected_index >= items.len().saturating_sub(1) {
             // Already at the bottom
             return Ok(());
         }
 
         // Get the selected task
-        if let Some(SelectedItem::Task(selected_task)) = &self.selected_item {
+        if let Some(SelectedItem::Task(selected_task)) = &self.ui.selected_item {
             if let Some(selected_task_id) = selected_task.id {
                 // Find the task below
-                let below_index = self.selected_index + 1;
+                let below_index = self.ui.selected_index + 1;
                 if let Some(Item::Task(below_task)) = items.get(below_index) {
                     if let Some(below_task_id) = below_task.id {
                         // Get the actual tasks from the list
@@ -2133,12 +2280,12 @@ impl App {
 
                             // Find the new index of the selected task (it moved down one position)
                             if let Some(new_index) = self.tasks.iter().position(|t| t.id == Some(selected_task_id)) {
-                                self.selected_index = new_index;
+                                self.ui.selected_index = new_index;
                                 self.sync_list_state();
                                 
                                 // Refresh selected item
                                 if let Some(updated_task) = self.tasks.get(new_index) {
-                                    self.selected_item = Some(SelectedItem::Task(updated_task.clone()));
+                                    self.ui.selected_item = Some(SelectedItem::Task(updated_task.clone()));
                                 }
                             }
 
@@ -2157,49 +2304,49 @@ impl App {
         // Set theme index to current theme
         let themes = self.get_available_themes();
         if let Some(index) = themes.iter().position(|t| t == &self.config.current_theme) {
-            self.settings_theme_index = index;
-            self.settings_theme_list_state.select(Some(index));
+            self.settings.theme_index = index;
+            self.settings.theme_list_state.select(Some(index));
         } else {
-            self.settings_theme_index = 0;
-            self.settings_theme_list_state.select(Some(0));
+            self.settings.theme_index = 0;
+            self.settings.theme_list_state.select(Some(0));
         }
         
         // Initialize category list state
-        self.settings_category_index = 0;
-        self.settings_list_state.select(Some(0));
+        self.settings.category_index = 0;
+        self.settings.list_state.select(Some(0));
         
         // Initialize sidebar width index to current value
         let width_options = self.get_sidebar_width_options();
         if let Some(index) = width_options.iter().position(|&w| w == self.config.sidebar_width_percent) {
-            self.settings_sidebar_width_index = index;
+            self.settings.sidebar_width_index = index;
         } else {
             // Find closest value
             let current = self.config.sidebar_width_percent;
             if let Some(index) = width_options.iter().position(|&w| w >= current) {
-                self.settings_sidebar_width_index = index;
+                self.settings.sidebar_width_index = index;
             } else {
-                self.settings_sidebar_width_index = width_options.len().saturating_sub(1);
+                self.settings.sidebar_width_index = width_options.len().saturating_sub(1);
             }
         }
         
         // Initialize display mode index to current value
         let mode_options = self.get_display_mode_options();
-        let current_mode_str = match self.list_view_mode {
+        let current_mode_str = match self.ui.list_view_mode {
             ListViewMode::Simple => "Simple",
             ListViewMode::TwoLine => "TwoLine",
             ListViewMode::GroupedByTags => "GroupedByTags",
         };
         if let Some(index) = mode_options.iter().position(|&m| m == current_mode_str) {
-            self.settings_display_mode_index = index;
+            self.settings.display_mode_index = index;
         } else {
-            self.settings_display_mode_index = 0;
+            self.settings.display_mode_index = 0;
         }
     }
 
     /// Get display name for a notebook (returns "[None]" if None)
     pub fn get_notebook_display_name(&self, id: Option<i64>) -> String {
         if let Some(notebook_id) = id {
-            self.notebooks
+            self.notebooks.notebooks
                 .iter()
                 .find(|n| n.id == Some(notebook_id))
                 .map(|n| n.name.clone())
@@ -2212,7 +2359,7 @@ impl App {
     /// Get notebook list with "[None]" first
     pub fn get_notebook_list_with_none(&self) -> Vec<(Option<i64>, String)> {
         let mut list = vec![(None, "[None]".to_string())];
-        for notebook in &self.notebooks {
+        for notebook in &self.notebooks.notebooks {
             if let Some(id) = notebook.id {
                 list.push((Some(id), notebook.name.clone()));
             }
@@ -2223,8 +2370,8 @@ impl App {
     /// Enter notebook modal mode
     pub fn enter_notebook_modal_mode(&mut self) {
         // Find the index of the current notebook in the list (0 = "[None]", 1+ = actual notebooks)
-        let selected_index = if let Some(current_id) = self.current_notebook_id {
-            self.notebooks
+        let selected_index = if let Some(current_id) = self.notebooks.current_notebook_id {
+            self.notebooks.notebooks
                 .iter()
                 .position(|n| n.id == Some(current_id))
                 .map(|idx| idx + 1) // +1 because "[None]" is at index 0
@@ -2233,26 +2380,26 @@ impl App {
             0 // "[None]" is selected
         };
 
-        self.notebook_modal_state = Some(NotebookModalState {
+        self.notebooks.modal_state = Some(NotebookModalState {
             mode: NotebookModalMode::View,
             selected_index,
             name_editor: Editor::new(),
             list_state: ListState::default(),
             current_field: NotebookModalField::NotebookList,
         });
-        self.notebook_modal_state.as_mut().unwrap().list_state.select(Some(selected_index));
-        self.mode = Mode::NotebookModal;
+        self.notebooks.modal_state.as_mut().unwrap().list_state.select(Some(selected_index));
+        self.ui.mode = Mode::NotebookModal;
     }
 
     /// Exit notebook modal mode
     pub fn exit_notebook_modal_mode(&mut self) {
-        self.mode = Mode::View;
-        self.notebook_modal_state = None;
+        self.ui.mode = Mode::View;
+        self.notebooks.modal_state = None;
     }
 
     /// Switch to a different notebook
     pub fn switch_notebook(&mut self, id: Option<i64>) -> Result<(), DatabaseError> {
-        self.current_notebook_id = id;
+        self.notebooks.current_notebook_id = id;
         // Reload data to filter by new notebook
         self.load_data()?;
         self.set_status_message(format!("Switched to notebook: {}", self.get_notebook_display_name(id)));
@@ -2267,7 +2414,7 @@ impl App {
         }
 
         // Check for duplicate names
-        if self.notebooks.iter().any(|n| n.name == name.trim()) {
+        if self.notebooks.notebooks.iter().any(|n| n.name == name.trim()) {
             self.set_status_message("A notebook with this name already exists".to_string());
             return Ok(());
         }
@@ -2275,11 +2422,11 @@ impl App {
         let mut notebook = Notebook::new(name.trim().to_string());
         let notebook_id = self.database.insert_notebook(&notebook)?;
         notebook.id = Some(notebook_id);
-        self.notebooks.push(notebook);
-        self.notebooks.sort_by(|a, b| a.name.cmp(&b.name));
+        self.notebooks.notebooks.push(notebook);
+        self.notebooks.notebooks.sort_by(|a, b| a.name.cmp(&b.name));
         
         // Reload to ensure consistency
-        self.notebooks = self.database.get_all_notebooks()?;
+        self.notebooks.notebooks = self.database.get_all_notebooks()?;
         
         self.set_status_message("Notebook created".to_string());
         Ok(())
@@ -2293,18 +2440,18 @@ impl App {
         }
 
         // Check for duplicate names (excluding the current notebook)
-        if self.notebooks.iter().any(|n| n.id != Some(id) && n.name == new_name.trim()) {
+        if self.notebooks.notebooks.iter().any(|n| n.id != Some(id) && n.name == new_name.trim()) {
             self.set_status_message("A notebook with this name already exists".to_string());
             return Ok(());
         }
 
-        if let Some(notebook) = self.notebooks.iter_mut().find(|n| n.id == Some(id)) {
+        if let Some(notebook) = self.notebooks.notebooks.iter_mut().find(|n| n.id == Some(id)) {
             notebook.name = new_name.trim().to_string();
             notebook.updated_at = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
             self.database.update_notebook(notebook)?;
             
             // Reload to ensure consistency
-            self.notebooks = self.database.get_all_notebooks()?;
+            self.notebooks.notebooks = self.database.get_all_notebooks()?;
             
             self.set_status_message("Notebook renamed".to_string());
         } else {
@@ -2317,18 +2464,18 @@ impl App {
     /// Items that belonged to this notebook will be moved to "[None]"
     pub fn delete_notebook(&mut self, id: i64) -> Result<(), DatabaseError> {
         // Check if this is the current notebook
-        if self.current_notebook_id == Some(id) {
+        if self.notebooks.current_notebook_id == Some(id) {
             // Switch to "[None]" before deleting
-            self.current_notebook_id = None;
+            self.notebooks.current_notebook_id = None;
         }
 
         self.database.delete_notebook(id)?;
         
         // Remove from local list
-        self.notebooks.retain(|n| n.id != Some(id));
+        self.notebooks.notebooks.retain(|n| n.id != Some(id));
         
         // Reload to ensure consistency
-        self.notebooks = self.database.get_all_notebooks()?;
+        self.notebooks.notebooks = self.database.get_all_notebooks()?;
         
         // Reload data to show items that were moved to "[None]"
         self.load_data()?;
@@ -2339,7 +2486,7 @@ impl App {
 
     /// Navigate notebook modal fields
     pub fn navigate_notebook_modal(&mut self, forward: bool) {
-        if let Some(ref mut state) = self.notebook_modal_state {
+        if let Some(ref mut state) = self.notebooks.modal_state {
             let fields = vec![
                 NotebookModalField::NotebookList,
                 NotebookModalField::Add,
@@ -2364,7 +2511,7 @@ impl App {
 
     /// Move notebook selection up
     pub fn move_notebook_selection_up(&mut self) {
-        if let Some(ref mut state) = self.notebook_modal_state {
+        if let Some(ref mut state) = self.notebooks.modal_state {
             if state.selected_index > 0 {
                 state.selected_index -= 1;
                 state.list_state.select(Some(state.selected_index));
@@ -2374,10 +2521,12 @@ impl App {
 
     /// Move notebook selection down
     pub fn move_notebook_selection_down(&mut self) {
-        if let Some(ref mut state) = self.notebook_modal_state {
-            let max_index = self.notebooks.len(); // "[None]" + notebooks
-            if state.selected_index < max_index {
-                state.selected_index += 1;
+        if let Some(ref mut state) = self.notebooks.modal_state {
+            let max_index = self.notebooks.notebooks.len(); // "[None]" + notebooks
+            // Allow incrementing up to and including max_index (the last notebook)
+            // Since index 0 is "[None]" and indices 1+ are notebooks, max_index is the last valid index
+            if state.selected_index <= max_index {
+                state.selected_index = (state.selected_index + 1).min(max_index);
                 state.list_state.select(Some(state.selected_index));
             }
         }
@@ -2385,7 +2534,7 @@ impl App {
 
     /// Get current notebook modal editor (for add/rename)
     pub fn get_notebook_modal_editor(&mut self) -> Option<&mut Editor> {
-        if let Some(ref mut state) = self.notebook_modal_state {
+        if let Some(ref mut state) = self.notebooks.modal_state {
             if matches!(state.mode, NotebookModalMode::Add | NotebookModalMode::Rename) {
                 Some(&mut state.name_editor)
             } else {

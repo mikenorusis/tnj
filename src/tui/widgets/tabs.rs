@@ -72,8 +72,8 @@ pub fn render_tabs(f: &mut Frame, area: Rect, current_tab: Tab, config: &Config,
     f.render_widget(tabs, tabs_area);
     
     // Render notebook selector on the right
-    let notebook_name = app.get_notebook_display_name(app.current_notebook_id);
-    let notebook_text = if app.mode == crate::tui::app::Mode::NotebookModal {
+    let notebook_name = app.get_notebook_display_name(app.notebooks.current_notebook_id);
+    let notebook_text = if app.ui.mode == crate::tui::app::Mode::NotebookModal {
         format!("Notebook: {} ▼", notebook_name)
     } else {
         format!("Notebook: {}", notebook_name)

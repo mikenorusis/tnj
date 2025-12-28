@@ -128,12 +128,12 @@ pub fn render_settings_view_modal(f: &mut Frame, area: Rect, app: &App) {
     
     // Render categories list in sidebar
     let categories = app.get_settings_categories();
-    let mut categories_list_state = app.settings_list_state.clone();
-    categories_list_state.select(Some(app.settings_category_index));
+    let mut categories_list_state = app.settings.list_state.clone();
+    categories_list_state.select(Some(app.settings.category_index));
     render_settings_list(f, sidebar_area, &categories, &mut categories_list_state, &app.config);
     
     // Render main content based on selected category
-    let selected_category = categories.get(app.settings_category_index);
+    let selected_category = categories.get(app.settings.category_index);
     match selected_category {
         Some(category) if category == "Theme Settings" => {
             render_theme_settings(f, main_area, app, fg_color, bg_color, highlight_fg, highlight_bg);
@@ -200,8 +200,8 @@ fn render_theme_settings(
                 .bg(highlight_bg)
         );
     
-    let mut list_state = app.settings_theme_list_state.clone();
-    list_state.select(Some(app.settings_theme_index));
+    let mut list_state = app.settings.theme_list_state.clone();
+    list_state.select(Some(app.settings.theme_index));
     StatefulWidget::render(list, theme_area, f.buffer_mut(), &mut list_state);
 }
 
@@ -252,7 +252,7 @@ fn render_appearance_settings(
     
     // Create a temporary list state for rendering
     let mut list_state = ListState::default();
-    list_state.select(Some(app.settings_sidebar_width_index));
+    list_state.select(Some(app.settings.sidebar_width_index));
     StatefulWidget::render(list, width_area, f.buffer_mut(), &mut list_state);
 }
 
@@ -269,7 +269,7 @@ fn render_display_settings(
     use crate::tui::app::ListViewMode;
     
     let mode_options = vec!["Simple", "TwoLine", "GroupedByTags"];
-    let current_mode_str = match app.list_view_mode {
+    let current_mode_str = match app.ui.list_view_mode {
         ListViewMode::Simple => "Simple",
         ListViewMode::TwoLine => "TwoLine",
         ListViewMode::GroupedByTags => "GroupedByTags",
@@ -309,7 +309,7 @@ fn render_display_settings(
     
     // Create a temporary list state for rendering
     let mut list_state = ListState::default();
-    list_state.select(Some(app.settings_display_mode_index));
+    list_state.select(Some(app.settings.display_mode_index));
     StatefulWidget::render(list, mode_area, f.buffer_mut(), &mut list_state);
 }
 
