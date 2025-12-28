@@ -18,6 +18,8 @@ pub struct Config {
     pub current_theme: String,
     #[serde(default)]
     pub themes: HashMap<String, Theme>,
+    #[serde(default = "default_list_view_mode")]
+    pub list_view_mode: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,6 +104,7 @@ impl Default for Config {
             key_bindings: KeyBindings::default(),
             current_theme: default_current_theme(),
             themes,
+            list_view_mode: default_list_view_mode(),
         }
     }
 }
@@ -322,6 +325,10 @@ fn default_tab_bg() -> String {
     "gray".to_string()
 }
 
+fn default_list_view_mode() -> String {
+    "Simple".to_string()
+}
+
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("Failed to read config directory: {0}")]
@@ -355,7 +362,12 @@ impl Config {
             // Create default config and save it
             let mut config = Config::default();
             config.database_path = Self::default_database_path_for_profile(profile);
-            config.save_with_profile(profile)?;
+            let save_result = config.save_with_profile(profile);
+            if let Err(ref e) = save_result {
+                eprintln!("ERROR: Failed to save config file: {}", e);
+                eprintln!("Config path: {:?}", config_path);
+            }
+            save_result?;
             Ok(config)
         }
     }

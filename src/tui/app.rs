@@ -169,6 +169,7 @@ pub struct App {
     pub settings_list_state: ListState, // ListState for settings categories
     pub settings_theme_list_state: ListState, // ListState for theme selector
     pub settings_sidebar_width_index: usize, // Selected sidebar width option
+    pub settings_display_mode_index: usize, // Selected display mode option
     pub list_view_mode: ListViewMode, // Current list view mode
     pub delete_confirmation: Option<SelectedItem>, // Item pending deletion confirmation
     pub delete_modal_selection: usize, // Selected option in delete modal (0=Archive, 1=Delete, 2=Cancel)
@@ -181,6 +182,14 @@ pub struct App {
 
 impl App {
     pub fn new(config: Config, database: Database) -> Result<Self, DatabaseError> {
+        // Load list_view_mode from config before moving config
+        let list_view_mode = match config.list_view_mode.as_str() {
+            "Simple" => ListViewMode::Simple,
+            "TwoLine" => ListViewMode::TwoLine,
+            "GroupedByTags" => ListViewMode::GroupedByTags,
+            _ => ListViewMode::Simple,
+        };
+        
         let mut app = Self {
             config,
             database,
@@ -205,7 +214,8 @@ impl App {
             settings_list_state: ListState::default(),
             settings_theme_list_state: ListState::default(),
             settings_sidebar_width_index: 0,
-            list_view_mode: ListViewMode::Simple,
+            settings_display_mode_index: 0,
+            list_view_mode,
             delete_confirmation: None,
             delete_modal_selection: 0,
             filter_tags: None,
@@ -682,6 +692,19 @@ impl App {
             ListViewMode::TwoLine => ListViewMode::GroupedByTags,
             ListViewMode::GroupedByTags => ListViewMode::Simple,
         };
+        
+        // Save to config
+        let mode_str = match self.list_view_mode {
+            ListViewMode::Simple => "Simple",
+            ListViewMode::TwoLine => "TwoLine",
+            ListViewMode::GroupedByTags => "GroupedByTags",
+        };
+        self.config.list_view_mode = mode_str.to_string();
+        if let Err(e) = self.config.save() {
+            // Log error but don't fail - this is a non-critical operation
+            eprintln!("Failed to save display mode: {}", e);
+        }
+        
         // Adjust selection to ensure it's valid for the new mode (skip headings in GroupedByTags)
         self.adjust_selected_index();
         self.select_current_item();
@@ -1116,6 +1139,58 @@ impl App {
             self.config.sidebar_width_percent = width;
             self.config.save()?;
             self.set_status_message(format!("Sidebar width set to {}%", width));
+        }
+        Ok(())
+    }
+
+    /// Get display mode options
+    pub fn get_display_mode_options(&self) -> Vec<&'static str> {
+        vec!["Simple", "TwoLine", "GroupedByTags"]
+    }
+
+    /// Move display mode selection up
+    pub fn move_settings_display_mode_up(&mut self) {
+        if self.settings_display_mode_index > 0 {
+            self.settings_display_mode_index -= 1;
+        }
+    }
+
+    /// Move display mode selection down
+    pub fn move_settings_display_mode_down(&mut self) {
+        let options = self.get_display_mode_options();
+        if self.settings_display_mode_index < options.len().saturating_sub(1) {
+            self.settings_display_mode_index += 1;
+        }
+    }
+
+    /// Apply selected display mode
+    pub fn apply_display_mode(&mut self) -> Result<(), crate::config::ConfigError> {
+        let options = self.get_display_mode_options();
+        if let Some(&mode_str) = options.get(self.settings_display_mode_index) {
+            let new_mode = match mode_str {
+                "Simple" => ListViewMode::Simple,
+                "TwoLine" => ListViewMode::TwoLine,
+                "GroupedByTags" => ListViewMode::GroupedByTags,
+                _ => return Ok(()), // Invalid mode, do nothing
+            };
+            
+            self.list_view_mode = new_mode;
+            self.config.list_view_mode = mode_str.to_string();
+            // Determine profile based on database path (same logic as get_config_file_path)
+            let db_path = self.config.get_database_path();
+            let db_path_str = db_path.to_string_lossy();
+            let profile = if db_path_str.contains("tnj-dev") {
+                crate::Profile::Dev
+            } else {
+                crate::Profile::Prod
+            };
+            self.config.save_with_profile(profile)?;
+            
+            // Adjust selection to ensure it's valid for the new mode
+            self.adjust_selected_index();
+            self.select_current_item();
+            
+            self.set_status_message(format!("Display mode set to: {}", mode_str));
         }
         Ok(())
     }
@@ -1723,7 +1798,7 @@ impl App {
 
     /// Get settings categories
     pub fn get_settings_categories(&self) -> Vec<String> {
-        vec!["Theme Settings".to_string(), "Appearance Settings".to_string(), "System Settings".to_string()]
+        vec!["Theme Settings".to_string(), "Appearance Settings".to_string(), "Display Settings".to_string(), "System Settings".to_string()]
     }
     
     /// Get config file path
@@ -1988,6 +2063,19 @@ impl App {
             } else {
                 self.settings_sidebar_width_index = width_options.len().saturating_sub(1);
             }
+        }
+        
+        // Initialize display mode index to current value
+        let mode_options = self.get_display_mode_options();
+        let current_mode_str = match self.list_view_mode {
+            ListViewMode::Simple => "Simple",
+            ListViewMode::TwoLine => "TwoLine",
+            ListViewMode::GroupedByTags => "GroupedByTags",
+        };
+        if let Some(index) = mode_options.iter().position(|&m| m == current_mode_str) {
+            self.settings_display_mode_index = index;
+        } else {
+            self.settings_display_mode_index = 0;
         }
     }
 }

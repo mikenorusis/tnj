@@ -141,6 +141,9 @@ pub fn render_settings_view_modal(f: &mut Frame, area: Rect, app: &App) {
         Some(category) if category == "Appearance Settings" => {
             render_appearance_settings(f, main_area, app, fg_color, bg_color, highlight_fg, highlight_bg);
         }
+        Some(category) if category == "Display Settings" => {
+            render_display_settings(f, main_area, app, fg_color, bg_color, highlight_fg, highlight_bg);
+        }
         Some(category) if category == "System Settings" => {
             render_system_settings(f, main_area, app, fg_color, bg_color);
         }
@@ -251,6 +254,63 @@ fn render_appearance_settings(
     let mut list_state = ListState::default();
     list_state.select(Some(app.settings_sidebar_width_index));
     StatefulWidget::render(list, width_area, f.buffer_mut(), &mut list_state);
+}
+
+/// Render display settings content
+fn render_display_settings(
+    f: &mut Frame,
+    main_area: Rect,
+    app: &App,
+    fg_color: ratatui::style::Color,
+    bg_color: ratatui::style::Color,
+    highlight_fg: ratatui::style::Color,
+    highlight_bg: ratatui::style::Color,
+) {
+    use crate::tui::app::ListViewMode;
+    
+    let mode_options = vec!["Simple", "TwoLine", "GroupedByTags"];
+    let current_mode_str = match app.list_view_mode {
+        ListViewMode::Simple => "Simple",
+        ListViewMode::TwoLine => "TwoLine",
+        ListViewMode::GroupedByTags => "GroupedByTags",
+    };
+    
+    // Calculate height needed for Display Mode box
+    let mode_box_height = (mode_options.len() + 2).max(5).min(main_area.height as usize) as u16;
+    
+    // Split main area vertically
+    let mode_areas = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(mode_box_height), // Display mode box
+            Constraint::Min(0), // Remaining space
+        ])
+        .split(main_area);
+    
+    let mode_area = mode_areas[0];
+    
+    // Create list items with radio button style
+    let items: Vec<ListItem> = mode_options.iter().map(|&mode| {
+        let is_selected = mode == current_mode_str;
+        let radio = if is_selected { "●" } else { "○" };
+        let text = format!("{} {}", radio, mode);
+        ListItem::new(text)
+    }).collect();
+    
+    // Render Display Mode sub-box with list
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title("Display Mode"))
+        .style(Style::default().fg(fg_color).bg(bg_color))
+        .highlight_style(
+            Style::default()
+                .fg(highlight_fg)
+                .bg(highlight_bg)
+        );
+    
+    // Create a temporary list state for rendering
+    let mut list_state = ListState::default();
+    list_state.select(Some(app.settings_display_mode_index));
+    StatefulWidget::render(list, mode_area, f.buffer_mut(), &mut list_state);
 }
 
 /// Render system settings content

@@ -1080,6 +1080,8 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                     app.move_settings_theme_selection_down();
                 } else if category == "Appearance Settings" {
                     app.move_settings_sidebar_width_down();
+                } else if category == "Display Settings" {
+                    app.move_settings_display_mode_down();
                 }
             }
         } else {
@@ -1099,6 +1101,8 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                     app.move_settings_theme_selection_up();
                 } else if category == "Appearance Settings" {
                     app.move_settings_sidebar_width_up();
+                } else if category == "Display Settings" {
+                    app.move_settings_display_mode_up();
                 }
             }
         } else {
@@ -1159,6 +1163,10 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                 } else if category == "Appearance Settings" {
                     if let Err(e) = app.apply_sidebar_width() {
                         app.set_status_message(format!("Failed to change sidebar width: {}", e));
+                    }
+                } else if category == "Display Settings" {
+                    if let Err(e) = app.apply_display_mode() {
+                        app.set_status_message(format!("Failed to change display mode: {}", e));
                     }
                 }
             }
