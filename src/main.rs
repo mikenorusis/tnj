@@ -29,7 +29,8 @@ fn main() -> Result<()> {
     )?;
 
     // Dispatch to appropriate command handler
-    match cli.command {
+    // Default to Tui if no command is provided
+    match cli.command.unwrap_or(Commands::Tui) {
         Commands::Tui => {
             let app = tnj::tui::App::new(config, db)?;
             tnj::tui::run_event_loop(app)?;

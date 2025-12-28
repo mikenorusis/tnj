@@ -20,7 +20,7 @@ pub struct Cli {
     pub dev: bool,
 
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
