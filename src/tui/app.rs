@@ -1,0 +1,1962 @@
+use crate::{Config, Database, models::{Task, Note, JournalEntry}};
+use crate::database::DatabaseError;
+use crate::tui::widgets::editor::Editor;
+use ratatui::widgets::ListState;
+use std::cmp;
+use std::time::Instant;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tab {
+    Tasks,
+    Notes,
+    Journal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SidebarState {
+    Expanded,
+    Collapsed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListViewMode {
+    Simple,
+    TwoLine,
+    GroupedByTags,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterArchivedStatus {
+    Active,
+    Archived,
+    All,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterTagLogic {
+    And,
+    Or,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterTaskStatus {
+    Todo,
+    Done,
+    All,
+}
+
+#[derive(Debug, Clone)]
+pub enum FilterFormField {
+    Tags,
+    Archived,
+    Status,
+    TagLogic,
+    Apply,
+    Clear,
+    Cancel,
+}
+
+#[derive(Debug, Clone)]
+pub struct FilterFormState {
+    pub current_field: FilterFormField,
+    pub tags: Editor,
+    pub archived_index: usize, // 0=Active, 1=Archived, 2=All
+    pub status_index: usize, // 0=Todo, 1=Done, 2=All
+    pub tag_logic_index: usize, // 0=AND, 1=OR
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Mode {
+    View,
+    Search,
+    Help,
+    Create,
+    Settings,
+    MarkdownHelp,
+    Filter,
+}
+
+#[derive(Debug, Clone)]
+pub enum ItemForm {
+    Task(TaskForm),
+    Note(NoteForm),
+    Journal(JournalForm),
+}
+
+// Keep CreateForm as an alias for backward compatibility during refactoring
+pub type CreateForm = ItemForm;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskField {
+    Title,
+    Description,
+    DueDate,
+    Tags,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoteField {
+    Title,
+    Tags,
+    Content,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JournalField {
+    Date,
+    Title,
+    Tags,
+    Content,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskForm {
+    pub current_field: TaskField,
+    pub title: Editor,
+    pub description: Editor,
+    pub due_date: Editor,
+    pub tags: Editor,
+    pub editing_item_id: Option<i64>, // None for new items, Some(id) for editing
+}
+
+#[derive(Debug, Clone)]
+pub struct NoteForm {
+    pub current_field: NoteField,
+    pub title: Editor,
+    pub content: Editor,
+    pub tags: Editor,
+    pub editing_item_id: Option<i64>, // None for new items, Some(id) for editing
+}
+
+#[derive(Debug, Clone)]
+pub struct JournalForm {
+    pub current_field: JournalField,
+    pub date: Editor,
+    pub title: Editor,
+    pub content: Editor,
+    pub tags: Editor,
+    pub editing_item_id: Option<i64>, // None for new items, Some(id) for editing
+}
+
+#[derive(Debug, Clone)]
+pub enum SelectedItem {
+    Task(Task),
+    Note(Note),
+    Journal(JournalEntry),
+}
+
+pub struct App {
+    pub config: Config,
+    pub database: Database,
+    pub current_tab: Tab,
+    pub sidebar_state: SidebarState,
+    pub selected_index: usize,
+    pub list_state: ListState,
+    pub tasks: Vec<Task>,
+    pub notes: Vec<Note>,
+    pub journals: Vec<JournalEntry>,
+    pub selected_item: Option<SelectedItem>,
+    pub mode: Mode,
+    pub search_query: String,
+    pub status_message: Option<String>,
+    pub status_message_time: Option<Instant>,
+    pub create_form: Option<CreateForm>,
+    pub item_view_scroll: usize, // Scroll offset for item view content
+    pub markdown_help_example_scroll: usize, // Scroll offset for markdown help example panel
+    pub markdown_help_rendered_scroll: usize, // Scroll offset for markdown help rendered panel
+    pub settings_category_index: usize, // Selected settings category
+    pub settings_theme_index: usize, // Selected theme in theme selector
+    pub settings_list_state: ListState, // ListState for settings categories
+    pub settings_theme_list_state: ListState, // ListState for theme selector
+    pub settings_sidebar_width_index: usize, // Selected sidebar width option
+    pub list_view_mode: ListViewMode, // Current list view mode
+    pub delete_confirmation: Option<SelectedItem>, // Item pending deletion confirmation
+    pub delete_modal_selection: usize, // Selected option in delete modal (0=Archive, 1=Delete, 2=Cancel)
+    pub filter_tags: Option<String>, // Comma-separated tag filter
+    pub filter_archived: Option<FilterArchivedStatus>, // Active/Archived/All filter
+    pub filter_task_status: Option<FilterTaskStatus>, // Todo/Done/All filter (task-specific)
+    pub filter_tag_logic: FilterTagLogic, // AND/OR for tag matching
+    pub filter_mode_state: Option<FilterFormState>, // State for filter modal editing
+}
+
+impl App {
+    pub fn new(config: Config, database: Database) -> Result<Self, DatabaseError> {
+        let mut app = Self {
+            config,
+            database,
+            current_tab: Tab::Tasks,
+            sidebar_state: SidebarState::Expanded,
+            selected_index: 0,
+            list_state: ListState::default(),
+            tasks: Vec::new(),
+            notes: Vec::new(),
+            journals: Vec::new(),
+            selected_item: None,
+            mode: Mode::View,
+            search_query: String::new(),
+            status_message: None,
+            status_message_time: None,
+            create_form: None,
+            item_view_scroll: 0,
+            markdown_help_example_scroll: 0,
+            markdown_help_rendered_scroll: 0,
+            settings_category_index: 0,
+            settings_theme_index: 0,
+            settings_list_state: ListState::default(),
+            settings_theme_list_state: ListState::default(),
+            settings_sidebar_width_index: 0,
+            list_view_mode: ListViewMode::Simple,
+            delete_confirmation: None,
+            delete_modal_selection: 0,
+            filter_tags: None,
+            filter_archived: Some(FilterArchivedStatus::Active),
+            filter_task_status: None,
+            filter_tag_logic: FilterTagLogic::And,
+            filter_mode_state: None,
+        };
+        
+        app.load_data()?;
+        app.sync_list_state();
+        // Auto-select the first item if available
+        app.select_current_item();
+        Ok(app)
+    }
+
+    pub fn load_data(&mut self) -> Result<(), DatabaseError> {
+        // Load archived items if filter requires them
+        let need_archived = matches!(self.filter_archived, Some(FilterArchivedStatus::Archived) | Some(FilterArchivedStatus::All));
+        
+        if need_archived {
+            self.tasks = self.database.get_all_tasks_including_archived()?;
+            self.notes = self.database.get_all_notes_including_archived()?;
+            self.journals = self.database.get_all_journals_including_archived()?;
+        } else {
+            self.tasks = self.database.get_all_tasks()?;
+            self.notes = self.database.get_all_notes()?;
+            self.journals = self.database.get_all_journals()?;
+        }
+        
+        // Assign order values to tasks that don't have them (migration)
+        // Check if all tasks have order 0 (need migration)
+        let all_zero = self.tasks.iter().all(|t| t.order == 0);
+        if all_zero && !self.tasks.is_empty() {
+            // Update all tasks with sequential order values
+            for (index, task) in self.tasks.iter_mut().enumerate() {
+                task.order = index as i64;
+            }
+            
+            // Update tasks in database with new order values
+            for task in &self.tasks {
+                if let Some(task_id) = task.id {
+                    self.database.update_task_order(task_id, task.order)?;
+                }
+            }
+            // Reload to get updated data, respecting the archived filter
+            if need_archived {
+                self.tasks = self.database.get_all_tasks_including_archived()?;
+            } else {
+                self.tasks = self.database.get_all_tasks()?;
+            }
+        }
+        
+        // Ensure selected_index is within bounds
+        self.adjust_selected_index();
+        
+        // Always select an item if there are items available (especially for tasks)
+        if self.current_tab == Tab::Tasks && !self.tasks.is_empty() {
+            self.select_current_item();
+        }
+        
+        Ok(())
+    }
+
+    pub fn get_current_items(&self) -> Vec<Item> {
+        // Create base iterator from current tab (lazy, no allocation yet)
+        let base_iter: Box<dyn Iterator<Item = Item>> = match self.current_tab {
+            Tab::Tasks => Box::new(self.tasks.iter().map(|t| Item::Task(t.clone()))),
+            Tab::Notes => Box::new(self.notes.iter().map(|n| Item::Note(n.clone()))),
+            Tab::Journal => Box::new(self.journals.iter().map(|j| Item::Journal(j.clone()))),
+        };
+
+        // Chain all filters into a single iterator (lazy, no allocation until collect)
+        let filtered_iter = base_iter
+            // Filter by search query if in search mode
+            .filter(|item: &Item| {
+                if self.mode == Mode::Search && !self.search_query.is_empty() {
+                    item.matches_search(&self.search_query)
+                } else {
+                    true
+                }
+            })
+            // Filter by archived status
+            .filter(|item: &Item| {
+                if let Some(archived_status) = self.filter_archived {
+                    let item_archived = match item {
+                        Item::Task(t) => t.archived,
+                        Item::Note(n) => n.archived,
+                        Item::Journal(j) => j.archived,
+                    };
+                    match archived_status {
+                        FilterArchivedStatus::Active => !item_archived,
+                        FilterArchivedStatus::Archived => item_archived,
+                        FilterArchivedStatus::All => true,
+                    }
+                } else {
+                    true
+                }
+            })
+            // Filter by tags
+            .filter(|item: &Item| {
+                if let Some(ref filter_tags) = self.filter_tags {
+                    if !filter_tags.trim().is_empty() {
+                        item.matches_tag_filter(filter_tags, self.filter_tag_logic)
+                    } else {
+                        true
+                    }
+                } else {
+                    true
+                }
+            })
+            // Filter by task status (only for tasks)
+            .filter(|item: &Item| {
+                if self.current_tab == Tab::Tasks {
+                    if let Some(task_status) = self.filter_task_status {
+                        match item {
+                            Item::Task(t) => {
+                                match task_status {
+                                    FilterTaskStatus::Todo => t.status == "todo",
+                                    FilterTaskStatus::Done => t.status == "done",
+                                    FilterTaskStatus::All => true,
+                                }
+                            }
+                            _ => true, // Non-task items are not affected
+                        }
+                    } else {
+                        true
+                    }
+                } else {
+                    true
+                }
+            });
+
+        // Collect only once at the end - only items that pass all filters are cloned
+        filtered_iter.collect()
+    }
+
+    pub fn get_current_item(&self) -> Option<&SelectedItem> {
+        self.selected_item.as_ref()
+    }
+
+    /// Get the display index to item index mapping for GroupedByTags mode
+    /// Returns a vector where each element indicates if that display index is a heading
+    /// and a mapping from display index to item index (for non-heading indices)
+    fn get_display_index_mapping(&self) -> (Vec<bool>, Vec<Option<usize>>) {
+        use crate::tui::widgets::tags::parse_tags;
+        use std::collections::HashMap;
+
+        let items = self.get_current_items();
+        
+        if self.list_view_mode != ListViewMode::GroupedByTags {
+            // For non-grouped modes, all display indices map directly to item indices
+            let is_heading: Vec<bool> = vec![false; items.len()];
+            let item_indices: Vec<Option<usize>> = (0..items.len()).map(Some).collect();
+            return (is_heading, item_indices);
+        }
+
+        // Build the same structure as the displayed list
+        let mut is_heading: Vec<bool> = Vec::new();
+        let mut item_indices: Vec<Option<usize>> = Vec::new();
+
+        // Group items by tags
+        let mut tag_map: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut untagged: Vec<usize> = Vec::new();
+
+        for (idx, item) in items.iter().enumerate() {
+            let tags = match item {
+                Item::Task(task) => parse_tags(task.tags.as_ref()),
+                Item::Note(note) => parse_tags(note.tags.as_ref()),
+                Item::Journal(journal) => parse_tags(journal.tags.as_ref()),
+            };
+
+            if tags.is_empty() {
+                untagged.push(idx);
+            } else {
+                for tag in tags {
+                    tag_map.entry(tag).or_insert_with(Vec::new).push(idx);
+                }
+            }
+        }
+
+        // Sort tags alphabetically
+        let mut sorted_tags: Vec<String> = tag_map.keys().cloned().collect();
+        sorted_tags.sort();
+
+        // Add untagged section if there are untagged items
+        if !untagged.is_empty() {
+            is_heading.push(true); // [Untagged] heading
+            item_indices.push(None);
+            
+            for item_idx in &untagged {
+                is_heading.push(false);
+                item_indices.push(Some(*item_idx));
+            }
+        }
+
+        // Add tagged sections
+        for tag in sorted_tags {
+            is_heading.push(true); // [tag] heading
+            item_indices.push(None);
+            
+            for item_idx in &tag_map[&tag] {
+                is_heading.push(false);
+                item_indices.push(Some(*item_idx));
+            }
+        }
+
+        (is_heading, item_indices)
+    }
+
+    pub fn select_current_item(&mut self) {
+        let items = self.get_current_items();
+        
+        if self.list_view_mode == ListViewMode::GroupedByTags {
+            let (is_heading, item_indices) = self.get_display_index_mapping();
+            
+            // Check if current display index is valid
+            if self.selected_index >= is_heading.len() {
+                self.selected_item = None;
+                return;
+            }
+            
+            // If it's a heading, don't select an item
+            if is_heading[self.selected_index] {
+                self.selected_item = None;
+                return;
+            }
+            
+            // Map display index to item index
+            if let Some(Some(item_idx)) = item_indices.get(self.selected_index) {
+                if let Some(item) = items.get(*item_idx) {
+                    self.selected_item = Some(match item {
+                        Item::Task(task) => {
+                            SelectedItem::Task(task.clone())
+                        }
+                        Item::Note(note) => {
+                            SelectedItem::Note(note.clone())
+                        }
+                        Item::Journal(journal) => {
+                            SelectedItem::Journal(journal.clone())
+                        }
+                    });
+                    self.mode = Mode::View;
+                    self.item_view_scroll = 0;
+                } else {
+                    self.selected_item = None;
+                }
+            } else {
+                self.selected_item = None;
+            }
+        } else {
+            // For non-grouped modes, use direct indexing
+            if !items.is_empty() {
+                // Ensure selected_index is valid
+                if self.selected_index >= items.len() {
+                    self.selected_index = 0;
+                }
+                
+                if let Some(item) = items.get(self.selected_index) {
+                    self.selected_item = Some(match item {
+                        Item::Task(task) => {
+                            SelectedItem::Task(task.clone())
+                        }
+                        Item::Note(note) => {
+                            SelectedItem::Note(note.clone())
+                        }
+                        Item::Journal(journal) => {
+                            SelectedItem::Journal(journal.clone())
+                        }
+                    });
+                    self.mode = Mode::View;
+                    // Reset scroll when selecting a new item
+                    self.item_view_scroll = 0;
+                }
+            } else {
+                // No items available, clear selection
+                self.selected_item = None;
+            }
+        }
+    }
+
+    pub fn adjust_selected_index(&mut self) {
+        if self.list_view_mode == ListViewMode::GroupedByTags {
+            let (is_heading, _) = self.get_display_index_mapping();
+            let display_len = is_heading.len();
+            
+            if display_len == 0 {
+                self.selected_index = 0;
+                self.selected_item = None;
+            } else {
+                // Ensure we have a valid selection - if index is out of bounds, select first item
+                if self.selected_index >= display_len {
+                    self.selected_index = 0;
+                } else {
+                    self.selected_index = cmp::min(self.selected_index, display_len.saturating_sub(1));
+                }
+            }
+        } else {
+            let items = self.get_current_items();
+            if items.is_empty() {
+                self.selected_index = 0;
+                self.selected_item = None;
+            } else {
+                // Ensure we have a valid selection - if index is out of bounds, select first item
+                if self.selected_index >= items.len() {
+                    self.selected_index = 0;
+                } else {
+                    self.selected_index = cmp::min(self.selected_index, items.len().saturating_sub(1));
+                }
+            }
+        }
+        self.sync_list_state();
+    }
+
+    /// Sync ListState with selected_index for proper scrolling
+    pub fn sync_list_state(&mut self) {
+        self.list_state.select(Some(self.selected_index));
+    }
+
+    pub fn move_selection_up(&mut self) {
+        if self.list_view_mode == ListViewMode::GroupedByTags {
+            let (is_heading, _) = self.get_display_index_mapping();
+            
+            // Find the previous non-heading item, or stop at the first item
+            let mut new_index = self.selected_index;
+            loop {
+                if new_index == 0 {
+                    break;
+                }
+                new_index -= 1;
+                if !is_heading[new_index] {
+                    self.selected_index = new_index;
+                    self.sync_list_state();
+                    self.select_current_item();
+                    return;
+                }
+            }
+            // If we couldn't find a non-heading item, just move to index 0
+            if self.selected_index > 0 {
+                self.selected_index = 0;
+                self.sync_list_state();
+                self.select_current_item();
+            }
+        } else {
+            if self.selected_index > 0 {
+                self.selected_index -= 1;
+                self.sync_list_state();
+                // Auto-select the item when navigating
+                self.select_current_item();
+            }
+        }
+    }
+
+    pub fn move_selection_down(&mut self) {
+        if self.list_view_mode == ListViewMode::GroupedByTags {
+            let (is_heading, _) = self.get_display_index_mapping();
+            let display_len = is_heading.len();
+            
+            // Find the next non-heading item, or stop at the last item
+            let mut new_index = self.selected_index;
+            loop {
+                if new_index >= display_len.saturating_sub(1) {
+                    break;
+                }
+                new_index += 1;
+                if !is_heading[new_index] {
+                    self.selected_index = new_index;
+                    self.sync_list_state();
+                    self.select_current_item();
+                    return;
+                }
+            }
+            // If we couldn't find a non-heading item, just move to the last index
+            if self.selected_index < display_len.saturating_sub(1) {
+                self.selected_index = display_len.saturating_sub(1);
+                self.sync_list_state();
+                self.select_current_item();
+            }
+        } else {
+            let items = self.get_current_items();
+            if self.selected_index < items.len().saturating_sub(1) {
+                self.selected_index += 1;
+                self.sync_list_state();
+                // Auto-select the item when navigating
+                self.select_current_item();
+            }
+        }
+    }
+
+    pub fn toggle_sidebar(&mut self) {
+        self.sidebar_state = match self.sidebar_state {
+            SidebarState::Expanded => SidebarState::Collapsed,
+            SidebarState::Collapsed => SidebarState::Expanded,
+        };
+    }
+
+    pub fn toggle_list_view_mode(&mut self) {
+        self.list_view_mode = match self.list_view_mode {
+            ListViewMode::Simple => ListViewMode::TwoLine,
+            ListViewMode::TwoLine => ListViewMode::GroupedByTags,
+            ListViewMode::GroupedByTags => ListViewMode::Simple,
+        };
+    }
+
+    /// Switch to a new tab and auto-select the first item if available
+    pub fn switch_tab(&mut self, new_tab: Tab) {
+        self.current_tab = new_tab;
+        self.selected_index = 0;
+        self.adjust_selected_index();
+        
+        // Auto-select the first item if available
+        // If no items exist, select_current_item() won't update selected_item,
+        // so we need to clear it to avoid showing items from other tabs
+        let items = self.get_current_items();
+        if items.is_empty() {
+            self.selected_item = None;
+        } else {
+            self.select_current_item();
+        }
+    }
+
+    pub fn set_status_message(&mut self, message: String) {
+        self.status_message = Some(message);
+        self.status_message_time = Some(Instant::now());
+    }
+
+    pub fn clear_status_message(&mut self) {
+        self.status_message = None;
+        self.status_message_time = None;
+    }
+
+    /// Check if status message should be auto-cleared (after 3 seconds)
+    pub fn check_status_message_timeout(&mut self) {
+        const STATUS_MESSAGE_TIMEOUT_SECS: u64 = 3;
+        if let Some(time) = self.status_message_time {
+            if time.elapsed().as_secs() >= STATUS_MESSAGE_TIMEOUT_SECS {
+                self.clear_status_message();
+            }
+        }
+    }
+
+    pub fn enter_search_mode(&mut self) {
+        self.mode = Mode::Search;
+        self.search_query.clear();
+    }
+
+    pub fn exit_search_mode(&mut self) {
+        self.mode = Mode::View;
+        self.search_query.clear();
+        self.adjust_selected_index();
+        self.sync_list_state();
+        // Auto-select the current item after exiting search
+        self.select_current_item();
+    }
+
+    pub fn enter_filter_mode(&mut self) {
+        self.mode = Mode::Filter;
+        // Initialize filter form state with current filter values
+        let tags_str = self.filter_tags.clone().unwrap_or_default();
+        let archived_index = match self.filter_archived {
+            Some(FilterArchivedStatus::Active) => 0,
+            Some(FilterArchivedStatus::Archived) => 1,
+            Some(FilterArchivedStatus::All) => 2,
+            None => 0,
+        };
+        let status_index = match self.filter_task_status {
+            Some(FilterTaskStatus::Todo) => 0,
+            Some(FilterTaskStatus::Done) => 1,
+            Some(FilterTaskStatus::All) => 2,
+            None => 2, // Default to All if not set
+        };
+        let tag_logic_index = match self.filter_tag_logic {
+            FilterTagLogic::And => 0,
+            FilterTagLogic::Or => 1,
+        };
+        self.filter_mode_state = Some(FilterFormState {
+            current_field: FilterFormField::Tags,
+            tags: Editor::from_string(tags_str),
+            archived_index,
+            status_index,
+            tag_logic_index,
+        });
+    }
+
+    pub fn exit_filter_mode(&mut self) {
+        self.mode = Mode::View;
+        self.filter_mode_state = None;
+    }
+
+    pub fn apply_filters(&mut self) {
+        if let Some(ref state) = self.filter_mode_state {
+            // Apply tags filter
+            let tags_content = if state.tags.lines.is_empty() {
+                String::new()
+            } else {
+                state.tags.lines[0].clone()
+            };
+            self.filter_tags = if tags_content.trim().is_empty() {
+                None
+            } else {
+                Some(tags_content.trim().to_string())
+            };
+
+            // Apply archived filter
+            self.filter_archived = match state.archived_index {
+                0 => Some(FilterArchivedStatus::Active),
+                1 => Some(FilterArchivedStatus::Archived),
+                2 => Some(FilterArchivedStatus::All),
+                _ => None,
+            };
+
+            // Apply tag logic
+            self.filter_tag_logic = match state.tag_logic_index {
+                0 => FilterTagLogic::And,
+                1 => FilterTagLogic::Or,
+                _ => FilterTagLogic::And,
+            };
+
+            // Apply task status filter (only relevant for Tasks tab)
+            if self.current_tab == Tab::Tasks {
+                self.filter_task_status = match state.status_index {
+                    0 => Some(FilterTaskStatus::Todo),
+                    1 => Some(FilterTaskStatus::Done),
+                    2 => Some(FilterTaskStatus::All),
+                    _ => Some(FilterTaskStatus::All),
+                };
+            } else {
+                // Clear task status filter when not on Tasks tab
+                self.filter_task_status = None;
+            }
+
+            // Reload data if needed (to get archived items)
+            if let Some(FilterArchivedStatus::Archived) | Some(FilterArchivedStatus::All) = self.filter_archived {
+                if let Err(e) = self.load_data() {
+                    self.set_status_message(format!("Failed to reload data: {}", e));
+                }
+            }
+
+            // Reset selection and update display
+            self.selected_index = 0;
+            self.adjust_selected_index();
+            self.select_current_item();
+            self.set_status_message("Filters applied".to_string());
+        }
+        self.exit_filter_mode();
+    }
+
+    pub fn clear_filters(&mut self) {
+        self.filter_tags = None;
+        self.filter_archived = Some(FilterArchivedStatus::Active);
+        self.filter_task_status = None;
+        // Reload data to get only active items
+        if let Err(e) = self.load_data() {
+            self.set_status_message(format!("Failed to reload data: {}", e));
+        } else {
+            self.selected_index = 0;
+            self.adjust_selected_index();
+            self.select_current_item();
+            self.set_status_message("Filters cleared".to_string());
+        }
+    }
+
+    pub fn get_filter_summary(&self) -> String {
+        let mut parts = Vec::new();
+        
+        if let Some(ref tags) = self.filter_tags {
+            if !tags.trim().is_empty() {
+                parts.push(format!("Tags: {}", tags));
+            }
+        }
+        
+        if let Some(archived) = self.filter_archived {
+            let archived_str = match archived {
+                FilterArchivedStatus::Active => "Active",
+                FilterArchivedStatus::Archived => "Archived",
+                FilterArchivedStatus::All => "All",
+            };
+            parts.push(format!("Archived: {}", archived_str));
+        }
+        
+        if let Some(status) = self.filter_task_status {
+            let status_str = match status {
+                FilterTaskStatus::Todo => "Todo",
+                FilterTaskStatus::Done => "Done",
+                FilterTaskStatus::All => "All",
+            };
+            parts.push(format!("Status: {}", status_str));
+        }
+        
+        let logic_str = match self.filter_tag_logic {
+            FilterTagLogic::And => "AND",
+            FilterTagLogic::Or => "OR",
+        };
+        if self.filter_tags.is_some() {
+            parts.push(format!("Logic: {}", logic_str));
+        }
+        
+        if parts.is_empty() {
+            "No filters".to_string()
+        } else {
+            parts.join(" | ")
+        }
+    }
+
+    pub fn navigate_filter_field(&mut self, forward: bool) {
+        if let Some(ref mut state) = self.filter_mode_state {
+            // Build fields list - include Status only when on Tasks tab
+            let mut fields = vec![
+                FilterFormField::Tags,
+                FilterFormField::Archived,
+            ];
+            
+            // Add Status field only for Tasks tab
+            if self.current_tab == Tab::Tasks {
+                fields.push(FilterFormField::Status);
+            }
+            
+            fields.extend(vec![
+                FilterFormField::TagLogic,
+                FilterFormField::Apply,
+                FilterFormField::Clear,
+                FilterFormField::Cancel,
+            ]);
+            
+            let current_idx = fields.iter()
+                .position(|f| std::mem::discriminant(f) == std::mem::discriminant(&state.current_field))
+                .unwrap_or(0);
+            
+            let new_idx = if forward {
+                (current_idx + 1) % fields.len()
+            } else {
+                (current_idx + fields.len() - 1) % fields.len()
+            };
+            
+            state.current_field = fields[new_idx].clone();
+        }
+    }
+
+    pub fn get_current_filter_editor(&mut self) -> Option<&mut Editor> {
+        if let Some(ref mut state) = self.filter_mode_state {
+            if matches!(state.current_field, FilterFormField::Tags) {
+                Some(&mut state.tags)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn is_filter_tags_field_active(&self) -> bool {
+        if let Some(ref state) = self.filter_mode_state {
+            matches!(state.current_field, FilterFormField::Tags)
+        } else {
+            false
+        }
+    }
+
+    pub fn move_filter_archived_up(&mut self) {
+        if let Some(ref mut state) = self.filter_mode_state {
+            if state.archived_index > 0 {
+                state.archived_index -= 1;
+            }
+        }
+    }
+
+    pub fn move_filter_archived_down(&mut self) {
+        if let Some(ref mut state) = self.filter_mode_state {
+            if state.archived_index < 2 {
+                state.archived_index += 1;
+            }
+        }
+    }
+
+    pub fn move_filter_tag_logic_up(&mut self) {
+        if let Some(ref mut state) = self.filter_mode_state {
+            if state.tag_logic_index > 0 {
+                state.tag_logic_index -= 1;
+            }
+        }
+    }
+
+    pub fn move_filter_tag_logic_down(&mut self) {
+        if let Some(ref mut state) = self.filter_mode_state {
+            if state.tag_logic_index < 1 {
+                state.tag_logic_index += 1;
+            }
+        }
+    }
+
+    pub fn move_filter_status_up(&mut self) {
+        if let Some(ref mut state) = self.filter_mode_state {
+            if state.status_index > 0 {
+                state.status_index -= 1;
+            }
+        }
+    }
+
+    pub fn move_filter_status_down(&mut self) {
+        if let Some(ref mut state) = self.filter_mode_state {
+            if state.status_index < 2 {
+                state.status_index += 1;
+            }
+        }
+    }
+
+    pub fn enter_help_mode(&mut self) {
+        self.mode = Mode::Help;
+    }
+
+    pub fn exit_help_mode(&mut self) {
+        self.mode = Mode::View;
+    }
+
+    pub fn enter_markdown_help_mode(&mut self) {
+        self.mode = Mode::MarkdownHelp;
+        // Reset scroll positions when entering markdown help
+        self.markdown_help_example_scroll = 0;
+        self.markdown_help_rendered_scroll = 0;
+    }
+
+    pub fn exit_markdown_help_mode(&mut self) {
+        // Return to Create mode when exiting markdown help
+        self.mode = Mode::Create;
+    }
+
+    pub fn enter_settings_mode(&mut self) {
+        self.mode = Mode::Settings;
+        self.init_settings_state();
+    }
+
+    /// Move settings category selection up
+    pub fn move_settings_category_up(&mut self) {
+        if self.settings_category_index > 0 {
+            self.settings_category_index -= 1;
+            self.settings_list_state.select(Some(self.settings_category_index));
+        }
+    }
+
+    /// Move settings category selection down
+    pub fn move_settings_category_down(&mut self) {
+        let categories = self.get_settings_categories();
+        if self.settings_category_index < categories.len().saturating_sub(1) {
+            self.settings_category_index += 1;
+            self.settings_list_state.select(Some(self.settings_category_index));
+        }
+    }
+
+    /// Get available sidebar width options
+    pub fn get_sidebar_width_options(&self) -> Vec<u16> {
+        vec![20, 25, 30, 35, 40]
+    }
+
+    /// Move sidebar width selection up
+    pub fn move_settings_sidebar_width_up(&mut self) {
+        if self.settings_sidebar_width_index > 0 {
+            self.settings_sidebar_width_index -= 1;
+        }
+    }
+
+    /// Move sidebar width selection down
+    pub fn move_settings_sidebar_width_down(&mut self) {
+        let options = self.get_sidebar_width_options();
+        if self.settings_sidebar_width_index < options.len().saturating_sub(1) {
+            self.settings_sidebar_width_index += 1;
+        }
+    }
+
+    /// Apply selected sidebar width
+    pub fn apply_sidebar_width(&mut self) -> Result<(), crate::config::ConfigError> {
+        let options = self.get_sidebar_width_options();
+        if let Some(&width) = options.get(self.settings_sidebar_width_index) {
+            self.config.sidebar_width_percent = width;
+            self.config.save()?;
+            self.set_status_message(format!("Sidebar width set to {}%", width));
+        }
+        Ok(())
+    }
+
+    pub fn exit_settings_mode(&mut self) {
+        self.mode = Mode::View;
+    }
+
+    pub fn add_to_search(&mut self, ch: char) {
+        self.search_query.push(ch);
+        self.selected_index = 0; // Reset to top when searching
+        self.sync_list_state();
+    }
+
+    pub fn remove_from_search(&mut self) {
+        self.search_query.pop();
+        self.selected_index = 0; // Reset to top when searching
+        self.sync_list_state();
+    }
+
+    pub fn enter_edit_mode(&mut self) {
+        // Use form-based editing instead of single-field editing
+        // Populate form with existing item data
+        if let Some(ref item) = self.selected_item {
+            let form = match item {
+                SelectedItem::Task(task) => {
+                    CreateForm::Task(TaskForm {
+                        current_field: TaskField::Title,
+                        title: Editor::from_string(task.title.clone()),
+                        description: Editor::from_string(task.description.clone().unwrap_or_default()),
+                        due_date: Editor::from_string(task.due_date.clone().unwrap_or_default()),
+                        tags: Editor::from_string(task.tags.clone().unwrap_or_default()),
+                        editing_item_id: task.id,
+                    })
+                }
+                SelectedItem::Note(note) => {
+                    CreateForm::Note(NoteForm {
+                        current_field: NoteField::Title,
+                        title: Editor::from_string(note.title.clone()),
+                        tags: Editor::from_string(note.tags.clone().unwrap_or_default()),
+                        content: Editor::from_string(note.content.clone().unwrap_or_default()),
+                        editing_item_id: note.id,
+                    })
+                }
+                SelectedItem::Journal(journal) => {
+                    CreateForm::Journal(JournalForm {
+                        current_field: JournalField::Date,
+                        date: Editor::from_string(journal.date.clone()),
+                        title: Editor::from_string(journal.title.clone().unwrap_or_default()),
+                        content: Editor::from_string(journal.content.clone().unwrap_or_default()),
+                        tags: Editor::from_string(journal.tags.clone().unwrap_or_default()),
+                        editing_item_id: journal.id,
+                    })
+                }
+            };
+            self.create_form = Some(form);
+            self.mode = Mode::Create; // Use Create mode for form-based editing
+        } else {
+            self.set_status_message("No item selected".to_string());
+        }
+    }
+
+
+    pub fn enter_create_mode(&mut self) {
+        let form = match self.current_tab {
+            Tab::Tasks => {
+                CreateForm::Task(TaskForm {
+                    current_field: TaskField::Title,
+                    title: Editor::new(),
+                    description: Editor::new(),
+                    due_date: Editor::new(),
+                    tags: Editor::new(),
+                    editing_item_id: None,
+                })
+            }
+            Tab::Notes => {
+                CreateForm::Note(NoteForm {
+                    current_field: NoteField::Title,
+                    title: Editor::new(),
+                    tags: Editor::new(),
+                    content: Editor::new(),
+                    editing_item_id: None,
+                })
+            }
+            Tab::Journal => {
+                // Default date to today
+                let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+                CreateForm::Journal(JournalForm {
+                    current_field: JournalField::Date,
+                    date: Editor::from_string(today),
+                    title: Editor::new(),
+                    content: Editor::new(),
+                    tags: Editor::new(),
+                    editing_item_id: None,
+                })
+            }
+        };
+        self.create_form = Some(form);
+        self.mode = Mode::Create;
+    }
+
+    pub fn exit_create_mode(&mut self) {
+        self.create_form = None;
+        self.mode = Mode::View;
+    }
+
+    pub fn navigate_form_field(&mut self, forward: bool) {
+        if let Some(ref mut form) = self.create_form {
+            match form {
+                CreateForm::Task(task_form) => {
+                    let current = task_form.current_field;
+                    task_form.current_field = match (current, forward) {
+                        (TaskField::Title, true) => TaskField::Description,
+                        (TaskField::Description, true) => TaskField::DueDate,
+                        (TaskField::DueDate, true) => TaskField::Tags,
+                        (TaskField::Tags, true) => TaskField::Title, // Wrap around
+                        (TaskField::Title, false) => TaskField::Tags, // Wrap around
+                        (TaskField::Description, false) => TaskField::Title,
+                        (TaskField::DueDate, false) => TaskField::Description,
+                        (TaskField::Tags, false) => TaskField::DueDate,
+                    };
+                }
+                CreateForm::Note(note_form) => {
+                    let current = note_form.current_field;
+                    note_form.current_field = match (current, forward) {
+                        (NoteField::Title, true) => NoteField::Tags,
+                        (NoteField::Tags, true) => NoteField::Content,
+                        (NoteField::Content, true) => NoteField::Title, // Wrap around
+                        (NoteField::Title, false) => NoteField::Content, // Wrap around
+                        (NoteField::Tags, false) => NoteField::Title,
+                        (NoteField::Content, false) => NoteField::Tags,
+                    };
+                }
+                CreateForm::Journal(journal_form) => {
+                    let current = journal_form.current_field;
+                    journal_form.current_field = match (current, forward) {
+                        (JournalField::Date, true) => JournalField::Title,
+                        (JournalField::Title, true) => JournalField::Tags,
+                        (JournalField::Tags, true) => JournalField::Content,
+                        (JournalField::Content, true) => JournalField::Date, // Wrap around
+                        (JournalField::Date, false) => JournalField::Content, // Wrap around
+                        (JournalField::Title, false) => JournalField::Date,
+                        (JournalField::Tags, false) => JournalField::Title,
+                        (JournalField::Content, false) => JournalField::Tags,
+                    };
+                }
+            }
+        }
+    }
+
+    pub fn get_current_form_editor(&mut self) -> Option<&mut Editor> {
+        if let Some(ref mut form) = self.create_form {
+            match form {
+                CreateForm::Task(task_form) => {
+                    match task_form.current_field {
+                        TaskField::Title => Some(&mut task_form.title),
+                        TaskField::Description => Some(&mut task_form.description),
+                        TaskField::DueDate => Some(&mut task_form.due_date),
+                        TaskField::Tags => Some(&mut task_form.tags),
+                    }
+                }
+                CreateForm::Note(note_form) => {
+                    match note_form.current_field {
+                        NoteField::Title => Some(&mut note_form.title),
+                        NoteField::Tags => Some(&mut note_form.tags),
+                        NoteField::Content => Some(&mut note_form.content),
+                    }
+                }
+                CreateForm::Journal(journal_form) => {
+                    match journal_form.current_field {
+                        JournalField::Date => Some(&mut journal_form.date),
+                        JournalField::Title => Some(&mut journal_form.title),
+                        JournalField::Tags => Some(&mut journal_form.tags),
+                        JournalField::Content => Some(&mut journal_form.content),
+                    }
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn is_content_field_active(&self) -> bool {
+        if let Some(ref form) = self.create_form {
+            match form {
+                CreateForm::Note(note_form) => note_form.current_field == NoteField::Content,
+                CreateForm::Journal(journal_form) => journal_form.current_field == JournalField::Content,
+                CreateForm::Task(task_form) => task_form.current_field == TaskField::Description,
+            }
+        } else {
+            false
+        }
+    }
+
+    fn validate_task_form(&self, form: &TaskForm) -> Result<(), String> {
+        let title = form.title.to_string().trim().to_string();
+        if title.is_empty() {
+            return Err("Title is required".to_string());
+        }
+
+        // Validate due_date format if provided
+        let due_date = form.due_date.to_string().trim().to_string();
+        if !due_date.is_empty() {
+            if !chrono::NaiveDate::parse_from_str(&due_date, "%Y-%m-%d").is_ok() {
+                return Err("Due date must be in YYYY-MM-DD format".to_string());
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_note_form(&self, form: &NoteForm) -> Result<(), String> {
+        let title = form.title.to_string().trim().to_string();
+        if title.is_empty() {
+            return Err("Title is required".to_string());
+        }
+        Ok(())
+    }
+
+    fn validate_journal_form(&self, form: &JournalForm) -> Result<(), String> {
+        let date = form.date.to_string().trim().to_string();
+        if date.is_empty() {
+            return Err("Date is required".to_string());
+        }
+        if !chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d").is_ok() {
+            return Err("Date must be in YYYY-MM-DD format".to_string());
+        }
+        Ok(())
+    }
+
+    pub fn save_create_form(&mut self) -> Result<(), DatabaseError> {
+        if let Some(ref form) = self.create_form {
+            match form {
+                CreateForm::Task(task_form) => {
+                    // Validate
+                    if let Err(err) = self.validate_task_form(task_form) {
+                        self.set_status_message(format!("Validation error: {}", err));
+                        return Ok(());
+                    }
+
+                    // Extract values
+                    let title = task_form.title.to_string().trim().to_string();
+                    let description = task_form.description.to_string().trim().to_string();
+                    let due_date = task_form.due_date.to_string().trim().to_string();
+                    let tags = task_form.tags.to_string().trim().to_string();
+
+                    if let Some(item_id) = task_form.editing_item_id {
+                        // Update existing task
+                        if let Some(ref mut task) = self.tasks.iter_mut().find(|t| t.id == Some(item_id)) {
+                            task.title = title;
+                            task.description = if description.is_empty() { None } else { Some(description) };
+                            task.due_date = if due_date.is_empty() { None } else { Some(due_date) };
+                            task.tags = if tags.is_empty() { None } else { Some(tags) };
+                            task.updated_at = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                            
+                            // Update with error handling
+                            if let Err(e) = self.database.update_task(task) {
+                                self.set_status_message(format!("Failed to update task: {}", e));
+                                return Ok(());
+                            }
+                            
+                            if let Err(e) = self.load_data() {
+                                self.set_status_message(format!("Failed to reload data: {}", e));
+                                return Ok(());
+                            }
+                            
+                            // Refresh selected item
+                            if let Some(updated_task) = self.tasks.iter().find(|t| t.id == Some(item_id)) {
+                                self.selected_item = Some(SelectedItem::Task(updated_task.clone()));
+                            }
+                            self.set_status_message("Task updated".to_string());
+                        } else {
+                            self.set_status_message("Task not found".to_string());
+                            return Ok(());
+                        }
+                    } else {
+                        // Create new task
+                        let mut task = Task::new(title);
+                        task.description = if description.is_empty() { None } else { Some(description) };
+                        task.due_date = if due_date.is_empty() { None } else { Some(due_date) };
+                        task.tags = if tags.is_empty() { None } else { Some(tags) };
+                        
+                        // Assign order value (max + 1)
+                        let max_order = self.database.get_max_task_order()
+                            .unwrap_or(-1);
+                        task.order = max_order + 1;
+
+                        // Insert into database with error handling
+                        let task_id = match self.database.insert_task(&task) {
+                            Ok(id) => id,
+                            Err(e) => {
+                                self.set_status_message(format!("Failed to create task: {}", e));
+                                return Ok(());
+                            }
+                        };
+                        
+                        if let Err(e) = self.load_data() {
+                            self.set_status_message(format!("Failed to reload data: {}", e));
+                            return Ok(());
+                        }
+                        
+                        // Find and select the newly created task
+                        if let Some(new_task_index) = self.tasks.iter().position(|t| t.id == Some(task_id)) {
+                            self.selected_index = new_task_index;
+                            self.sync_list_state();
+                            if let Some(new_task) = self.tasks.get(new_task_index) {
+                                self.selected_item = Some(SelectedItem::Task(new_task.clone()));
+                            }
+                        } else {
+                            // If we can't find it, just ensure something is selected
+                            self.adjust_selected_index();
+                            self.select_current_item();
+                        }
+                        
+                        self.set_status_message("Task created".to_string());
+                    }
+                    self.exit_create_mode();
+                }
+                CreateForm::Note(note_form) => {
+                    // Validate
+                    if let Err(err) = self.validate_note_form(note_form) {
+                        self.set_status_message(format!("Validation error: {}", err));
+                        return Ok(());
+                    }
+
+                    // Extract values
+                    let title = note_form.title.to_string().trim().to_string();
+                    let content = note_form.content.to_string().trim().to_string();
+                    let tags = note_form.tags.to_string().trim().to_string();
+
+                    if let Some(item_id) = note_form.editing_item_id {
+                        // Update existing note
+                        if let Some(ref mut note) = self.notes.iter_mut().find(|n| n.id == Some(item_id)) {
+                            note.title = title;
+                            note.content = if content.is_empty() { None } else { Some(content) };
+                            note.tags = if tags.is_empty() { None } else { Some(tags) };
+                            note.updated_at = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                            
+                            // Update with error handling
+                            if let Err(e) = self.database.update_note(note) {
+                                self.set_status_message(format!("Failed to update note: {}", e));
+                                return Ok(());
+                            }
+                            
+                            if let Err(e) = self.load_data() {
+                                self.set_status_message(format!("Failed to reload data: {}", e));
+                                return Ok(());
+                            }
+                            
+                            // Refresh selected item
+                            if let Some(updated_note) = self.notes.iter().find(|n| n.id == Some(item_id)) {
+                                self.selected_item = Some(SelectedItem::Note(updated_note.clone()));
+                            }
+                            self.set_status_message("Note updated".to_string());
+                        } else {
+                            self.set_status_message("Note not found".to_string());
+                            return Ok(());
+                        }
+                    } else {
+                        // Create new note
+                        let mut note = Note::new(title);
+                        note.content = if content.is_empty() { None } else { Some(content) };
+                        note.tags = if tags.is_empty() { None } else { Some(tags) };
+
+                        // Insert into database with error handling
+                        if let Err(e) = self.database.insert_note(&note) {
+                            self.set_status_message(format!("Failed to create note: {}", e));
+                            return Ok(());
+                        }
+                        
+                        if let Err(e) = self.load_data() {
+                            self.set_status_message(format!("Failed to reload data: {}", e));
+                            return Ok(());
+                        }
+                        
+                        self.set_status_message("Note created".to_string());
+                    }
+                    self.exit_create_mode();
+                }
+                CreateForm::Journal(journal_form) => {
+                    // Validate
+                    if let Err(err) = self.validate_journal_form(journal_form) {
+                        self.set_status_message(format!("Validation error: {}", err));
+                        return Ok(());
+                    }
+
+                    // Extract values
+                    let date = journal_form.date.to_string().trim().to_string();
+                    let title = journal_form.title.to_string().trim().to_string();
+                    let content = journal_form.content.to_string().trim().to_string();
+                    let tags = journal_form.tags.to_string().trim().to_string();
+
+                    if let Some(item_id) = journal_form.editing_item_id {
+                        // Update existing journal entry
+                        if let Some(ref mut journal) = self.journals.iter_mut().find(|j| j.id == Some(item_id)) {
+                            journal.date = date;
+                            journal.title = if title.is_empty() { None } else { Some(title) };
+                            journal.content = if content.is_empty() { None } else { Some(content) };
+                            journal.tags = if tags.is_empty() { None } else { Some(tags) };
+                            journal.updated_at = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                            
+                            // Update with error handling
+                            if let Err(e) = self.database.update_journal(journal) {
+                                self.set_status_message(format!("Failed to update journal entry: {}", e));
+                                return Ok(());
+                            }
+                            
+                            if let Err(e) = self.load_data() {
+                                self.set_status_message(format!("Failed to reload data: {}", e));
+                                return Ok(());
+                            }
+                            
+                            // Refresh selected item
+                            if let Some(updated_journal) = self.journals.iter().find(|j| j.id == Some(item_id)) {
+                                self.selected_item = Some(SelectedItem::Journal(updated_journal.clone()));
+                            }
+                            self.set_status_message("Journal entry updated".to_string());
+                        } else {
+                            self.set_status_message("Journal entry not found".to_string());
+                            return Ok(());
+                        }
+                    } else {
+                        // Create new journal entry
+                        let mut journal = JournalEntry::new(date);
+                        journal.title = if title.is_empty() { None } else { Some(title) };
+                        journal.content = if content.is_empty() { None } else { Some(content) };
+                        journal.tags = if tags.is_empty() { None } else { Some(tags) };
+
+                        // Insert into database with error handling
+                        if let Err(e) = self.database.insert_journal(&journal) {
+                            self.set_status_message(format!("Failed to create journal entry: {}", e));
+                            return Ok(());
+                        }
+                        
+                        if let Err(e) = self.load_data() {
+                            self.set_status_message(format!("Failed to reload data: {}", e));
+                            return Ok(());
+                        }
+                        
+                        self.set_status_message("Journal entry created".to_string());
+                    }
+                    self.exit_create_mode();
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Get total number of lines for the current selected item (for scrolling calculations)
+    /// This is a simplified version that doesn't account for wrapping - actual wrapping
+    /// happens in render. This is just for approximate scroll calculations.
+    fn get_item_view_total_lines(&self) -> usize {
+        if let Some(ref item) = self.selected_item {
+            match item {
+                SelectedItem::Task(task) => {
+                    let mut count = 2; // Title, Status
+                    if task.due_date.is_some() {
+                        count += 1;
+                    }
+                    if let Some(ref description) = task.description {
+                        count += 2; // Empty line + "Description:" label
+                        count += description.lines().count();
+                    }
+                    if task.tags.is_some() {
+                        count += 2; // Empty line + Tags line
+                    }
+                    count
+                }
+                SelectedItem::Note(note) => {
+                    let mut count = 1; // Title
+                    if let Some(ref content) = note.content {
+                        count += 2; // Empty line + "Content:" label
+                        count += content.lines().count();
+                    }
+                    if note.tags.is_some() {
+                        count += 2; // Empty line + Tags line
+                    }
+                    count
+                }
+                SelectedItem::Journal(journal) => {
+                    let mut count = 1; // Date
+                    if journal.title.is_some() {
+                        count += 1;
+                    }
+                    if let Some(ref content) = journal.content {
+                        count += 2; // Empty line + "Content:" label
+                        count += content.lines().count();
+                    }
+                    if journal.tags.is_some() {
+                        count += 2; // Empty line + Tags line
+                    }
+                    count
+                }
+            }
+        } else {
+            0
+        }
+    }
+
+    /// Scroll item view content up by one line
+    pub fn scroll_item_view_up(&mut self) {
+        if self.item_view_scroll > 0 {
+            self.item_view_scroll -= 1;
+        }
+    }
+
+    /// Scroll item view content down by one line
+    pub fn scroll_item_view_down(&mut self) {
+        // Just increment - render will clamp it appropriately
+        self.item_view_scroll += 1;
+    }
+
+    /// Scroll item view content up by one page (viewport height)
+    pub fn scroll_item_view_page_up(&mut self, viewport_height: usize) {
+        if self.item_view_scroll >= viewport_height {
+            self.item_view_scroll -= viewport_height;
+        } else {
+            self.item_view_scroll = 0;
+        }
+    }
+
+    /// Scroll item view content down by one page (viewport height)
+    pub fn scroll_item_view_page_down(&mut self, viewport_height: usize) {
+        let total_lines = self.get_item_view_total_lines();
+        let max_scroll = total_lines.saturating_sub(viewport_height);
+        if self.item_view_scroll + viewport_height <= max_scroll {
+            self.item_view_scroll += viewport_height;
+        } else {
+            self.item_view_scroll = max_scroll;
+        }
+    }
+
+    /// Scroll item view content to top
+    pub fn scroll_item_view_to_top(&mut self) {
+        self.item_view_scroll = 0;
+    }
+
+    /// Scroll item view content to bottom
+    pub fn scroll_item_view_to_bottom(&mut self, viewport_height: usize) {
+        let total_lines = self.get_item_view_total_lines();
+        self.item_view_scroll = total_lines.saturating_sub(viewport_height);
+    }
+
+    /// Scroll markdown help example panel up by one line
+    pub fn scroll_markdown_help_example_up(&mut self) {
+        if self.markdown_help_example_scroll > 0 {
+            self.markdown_help_example_scroll -= 1;
+        }
+    }
+
+    /// Scroll markdown help example panel down by one line
+    pub fn scroll_markdown_help_example_down(&mut self) {
+        self.markdown_help_example_scroll += 1;
+    }
+
+    /// Scroll markdown help rendered panel up by one line
+    pub fn scroll_markdown_help_rendered_up(&mut self) {
+        if self.markdown_help_rendered_scroll > 0 {
+            self.markdown_help_rendered_scroll -= 1;
+        }
+    }
+
+    /// Scroll markdown help rendered panel down by one line
+    pub fn scroll_markdown_help_rendered_down(&mut self) {
+        self.markdown_help_rendered_scroll += 1;
+    }
+
+    /// Scroll markdown help example panel up by one page
+    pub fn scroll_markdown_help_example_page_up(&mut self, viewport_height: usize) {
+        if self.markdown_help_example_scroll >= viewport_height {
+            self.markdown_help_example_scroll -= viewport_height;
+        } else {
+            self.markdown_help_example_scroll = 0;
+        }
+    }
+
+    /// Scroll markdown help example panel down by one page
+    pub fn scroll_markdown_help_example_page_down(&mut self, viewport_height: usize, total_lines: usize) {
+        let max_scroll = total_lines.saturating_sub(viewport_height);
+        if self.markdown_help_example_scroll + viewport_height <= max_scroll {
+            self.markdown_help_example_scroll += viewport_height;
+        } else {
+            self.markdown_help_example_scroll = max_scroll;
+        }
+    }
+
+    /// Scroll markdown help rendered panel up by one page
+    pub fn scroll_markdown_help_rendered_page_up(&mut self, viewport_height: usize) {
+        if self.markdown_help_rendered_scroll >= viewport_height {
+            self.markdown_help_rendered_scroll -= viewport_height;
+        } else {
+            self.markdown_help_rendered_scroll = 0;
+        }
+    }
+
+    /// Scroll markdown help rendered panel down by one page
+    pub fn scroll_markdown_help_rendered_page_down(&mut self, viewport_height: usize, total_lines: usize) {
+        let max_scroll = total_lines.saturating_sub(viewport_height);
+        if self.markdown_help_rendered_scroll + viewport_height <= max_scroll {
+            self.markdown_help_rendered_scroll += viewport_height;
+        } else {
+            self.markdown_help_rendered_scroll = max_scroll;
+        }
+    }
+
+    /// Get settings categories
+    pub fn get_settings_categories(&self) -> Vec<String> {
+        vec!["Theme Settings".to_string(), "Appearance Settings".to_string(), "System Settings".to_string()]
+    }
+    
+    /// Get config file path
+    pub fn get_config_file_path(&self) -> String {
+        // Determine profile based on database path
+        let db_path = self.config.get_database_path();
+        let db_path_str = db_path.to_string_lossy();
+        let profile = if db_path_str.contains("tnj-dev") {
+            crate::Profile::Dev
+        } else {
+            crate::Profile::Prod
+        };
+        
+        match Config::get_config_path(profile) {
+            Ok(path) => path.to_string_lossy().to_string(),
+            Err(_) => "Unknown".to_string(),
+        }
+    }
+    
+    /// Get database file path
+    pub fn get_database_file_path(&self) -> String {
+        self.config.get_database_path().to_string_lossy().to_string()
+    }
+
+    /// Get available themes
+    pub fn get_available_themes(&self) -> Vec<String> {
+        self.config.get_available_themes()
+    }
+
+    /// Move settings theme selection up
+    pub fn move_settings_theme_selection_up(&mut self) {
+        if self.settings_theme_index > 0 {
+            self.settings_theme_index -= 1;
+            self.settings_theme_list_state.select(Some(self.settings_theme_index));
+        }
+    }
+
+    /// Move settings theme selection down
+    pub fn move_settings_theme_selection_down(&mut self) {
+        let themes = self.get_available_themes();
+        if self.settings_theme_index < themes.len().saturating_sub(1) {
+            self.settings_theme_index += 1;
+            self.settings_theme_list_state.select(Some(self.settings_theme_index));
+        }
+    }
+
+    /// Select and apply a theme
+    pub fn select_theme(&mut self, theme_name: &str) -> Result<(), crate::config::ConfigError> {
+        self.config.set_theme(theme_name)?;
+        self.config.save()?;
+        
+        // Update theme index to match current theme
+        let themes = self.get_available_themes();
+        if let Some(index) = themes.iter().position(|t| t == theme_name) {
+            self.settings_theme_index = index;
+            self.settings_theme_list_state.select(Some(index));
+        }
+        
+        self.set_status_message(format!("Theme changed to: {}", theme_name));
+        Ok(())
+    }
+
+    /// Toggle task status between "todo" and "done"
+    /// Only works when on Tasks tab with a task selected
+    pub fn toggle_task_status(&mut self) -> Result<(), DatabaseError> {
+        // Only work on Tasks tab
+        if self.current_tab != Tab::Tasks {
+            return Ok(());
+        }
+
+        // Check if a task is selected
+        if let Some(SelectedItem::Task(task)) = &self.selected_item {
+            if let Some(task_id) = task.id {
+                // Find the task in the list
+                if let Some(ref mut task) = self.tasks.iter_mut().find(|t| t.id == Some(task_id)) {
+                    // Get current status before toggling
+                    let was_done = task.status == "done";
+                    
+                    // Toggle status
+                    task.status = if was_done {
+                        "todo".to_string()
+                    } else {
+                        "done".to_string()
+                    };
+                    task.updated_at = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                    
+                    // Update in database
+                    self.database.update_task(task)?;
+                    
+                    // Reload data
+                    self.load_data()?;
+                    
+                    // Refresh selected item
+                    if let Some(updated_task) = self.tasks.iter().find(|t| t.id == Some(task_id)) {
+                        self.selected_item = Some(SelectedItem::Task(updated_task.clone()));
+                    }
+                    
+                    let status_msg = if !was_done {
+                        "Task marked as done"
+                    } else {
+                        "Task marked as todo"
+                    };
+                    self.set_status_message(status_msg.to_string());
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
+    /// Reorder task up (swap with task above)
+    /// Only works when on Tasks tab with a task selected
+    pub fn reorder_task_up(&mut self) -> Result<(), DatabaseError> {
+        // Only work on Tasks tab
+        if self.current_tab != Tab::Tasks {
+            return Ok(());
+        }
+
+        // Check if we have a valid selection
+        if self.selected_index == 0 {
+            // Already at the top
+            return Ok(());
+        }
+
+        let items = self.get_current_items();
+        if items.is_empty() || self.selected_index >= items.len() {
+            return Ok(());
+        }
+
+        // Get the selected task
+        if let Some(SelectedItem::Task(selected_task)) = &self.selected_item {
+            if let Some(selected_task_id) = selected_task.id {
+                // Find the task above
+                let above_index = self.selected_index - 1;
+                if let Some(Item::Task(above_task)) = items.get(above_index) {
+                    if let Some(above_task_id) = above_task.id {
+                        // Get the actual tasks from the list
+                        if let (Some(selected_task), Some(above_task)) = (
+                            self.tasks.iter().find(|t| t.id == Some(selected_task_id)),
+                            self.tasks.iter().find(|t| t.id == Some(above_task_id)),
+                        ) {
+                            // Swap order values
+                            let selected_order = selected_task.order;
+                            let above_order = above_task.order;
+
+                            // Update both tasks in database
+                            self.database.update_task_order(selected_task_id, above_order)?;
+                            self.database.update_task_order(above_task_id, selected_order)?;
+
+                            // Reload data
+                            self.load_data()?;
+
+                            // Find the new index of the selected task (it moved up one position)
+                            if let Some(new_index) = self.tasks.iter().position(|t| t.id == Some(selected_task_id)) {
+                                self.selected_index = new_index;
+                                self.sync_list_state();
+                                
+                                // Refresh selected item
+                                if let Some(updated_task) = self.tasks.get(new_index) {
+                                    self.selected_item = Some(SelectedItem::Task(updated_task.clone()));
+                                }
+                            }
+
+                            self.set_status_message("Task moved up".to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Reorder task down (swap with task below)
+    /// Only works when on Tasks tab with a task selected
+    pub fn reorder_task_down(&mut self) -> Result<(), DatabaseError> {
+        // Only work on Tasks tab
+        if self.current_tab != Tab::Tasks {
+            return Ok(());
+        }
+
+        let items = self.get_current_items();
+        if items.is_empty() {
+            return Ok(());
+        }
+
+        // Check if we have a valid selection
+        if self.selected_index >= items.len().saturating_sub(1) {
+            // Already at the bottom
+            return Ok(());
+        }
+
+        // Get the selected task
+        if let Some(SelectedItem::Task(selected_task)) = &self.selected_item {
+            if let Some(selected_task_id) = selected_task.id {
+                // Find the task below
+                let below_index = self.selected_index + 1;
+                if let Some(Item::Task(below_task)) = items.get(below_index) {
+                    if let Some(below_task_id) = below_task.id {
+                        // Get the actual tasks from the list
+                        if let (Some(selected_task), Some(below_task)) = (
+                            self.tasks.iter().find(|t| t.id == Some(selected_task_id)),
+                            self.tasks.iter().find(|t| t.id == Some(below_task_id)),
+                        ) {
+                            // Swap order values
+                            let selected_order = selected_task.order;
+                            let below_order = below_task.order;
+
+                            // Update both tasks in database
+                            self.database.update_task_order(selected_task_id, below_order)?;
+                            self.database.update_task_order(below_task_id, selected_order)?;
+
+                            // Reload data
+                            self.load_data()?;
+
+                            // Find the new index of the selected task (it moved down one position)
+                            if let Some(new_index) = self.tasks.iter().position(|t| t.id == Some(selected_task_id)) {
+                                self.selected_index = new_index;
+                                self.sync_list_state();
+                                
+                                // Refresh selected item
+                                if let Some(updated_task) = self.tasks.get(new_index) {
+                                    self.selected_item = Some(SelectedItem::Task(updated_task.clone()));
+                                }
+                            }
+
+                            self.set_status_message("Task moved down".to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Initialize settings state when entering Settings mode
+    pub fn init_settings_state(&mut self) {
+        // Set theme index to current theme
+        let themes = self.get_available_themes();
+        if let Some(index) = themes.iter().position(|t| t == &self.config.current_theme) {
+            self.settings_theme_index = index;
+            self.settings_theme_list_state.select(Some(index));
+        } else {
+            self.settings_theme_index = 0;
+            self.settings_theme_list_state.select(Some(0));
+        }
+        
+        // Initialize category list state
+        self.settings_category_index = 0;
+        self.settings_list_state.select(Some(0));
+        
+        // Initialize sidebar width index to current value
+        let width_options = self.get_sidebar_width_options();
+        if let Some(index) = width_options.iter().position(|&w| w == self.config.sidebar_width_percent) {
+            self.settings_sidebar_width_index = index;
+        } else {
+            // Find closest value
+            let current = self.config.sidebar_width_percent;
+            if let Some(index) = width_options.iter().position(|&w| w >= current) {
+                self.settings_sidebar_width_index = index;
+            } else {
+                self.settings_sidebar_width_index = width_options.len().saturating_sub(1);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Item {
+    Task(Task),
+    Note(Note),
+    Journal(JournalEntry),
+}
+
+impl Item {
+    pub fn matches_search(&self, query: &str) -> bool {
+        let query_lower = query.to_lowercase();
+        match self {
+            Item::Task(task) => {
+                task.title.to_lowercase().contains(&query_lower) ||
+                task.description.as_ref().map(|d| d.to_lowercase().contains(&query_lower)).unwrap_or(false) ||
+                task.tags.as_ref().map(|t| t.to_lowercase().contains(&query_lower)).unwrap_or(false)
+            }
+            Item::Note(note) => {
+                note.title.to_lowercase().contains(&query_lower) ||
+                note.content.as_ref().map(|c| c.to_lowercase().contains(&query_lower)).unwrap_or(false) ||
+                note.tags.as_ref().map(|t| t.to_lowercase().contains(&query_lower)).unwrap_or(false)
+            }
+            Item::Journal(journal) => {
+                journal.date.to_lowercase().contains(&query_lower) ||
+                journal.title.as_ref().map(|t| t.to_lowercase().contains(&query_lower)).unwrap_or(false) ||
+                journal.content.as_ref().map(|c| c.to_lowercase().contains(&query_lower)).unwrap_or(false) ||
+                journal.tags.as_ref().map(|t| t.to_lowercase().contains(&query_lower)).unwrap_or(false)
+            }
+        }
+    }
+
+    pub fn matches_tag_filter(&self, filter_tags: &str, logic: FilterTagLogic) -> bool {
+        use crate::tui::widgets::tags::parse_tags;
+        
+        let filter_tag_list: Vec<String> = filter_tags
+            .split(',')
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect();
+        
+        if filter_tag_list.is_empty() {
+            return true; // No filter tags means match all
+        }
+        
+        let item_tags = match self {
+            Item::Task(task) => parse_tags(task.tags.as_ref()),
+            Item::Note(note) => parse_tags(note.tags.as_ref()),
+            Item::Journal(journal) => parse_tags(journal.tags.as_ref()),
+        };
+        
+        let is_untagged = item_tags.is_empty();
+        
+        // Check if "[Untagged]" is in the filter (case-insensitive)
+        let has_untagged_filter = filter_tag_list.iter().any(|tag| tag == "[untagged]");
+        
+        // Remove "[Untagged]" from filter list for normal tag matching
+        let regular_filter_tags: Vec<String> = filter_tag_list.iter()
+            .filter(|tag| tag != &"[untagged]")
+            .cloned()
+            .collect();
+        
+        let item_tags_lower: Vec<String> = item_tags.iter()
+            .map(|t| t.to_lowercase())
+            .collect();
+        
+        match logic {
+            FilterTagLogic::And => {
+                // For AND logic:
+                // - If "[Untagged]" is the only filter: match only untagged items
+                // - If "[Untagged]" is combined with other tags: impossible (can't be untagged and have tags), so no match
+                // - If only regular tags: item must have ALL regular tags
+                if has_untagged_filter {
+                    if regular_filter_tags.is_empty() {
+                        // Only "[Untagged]" filter: match untagged items
+                        return is_untagged;
+                    } else {
+                        // "[Untagged]" + other tags with AND: impossible, no match
+                        return false;
+                    }
+                } else {
+                    // Only regular tags: item must have ALL filter tags
+                    regular_filter_tags.iter().all(|filter_tag| {
+                        item_tags_lower.contains(filter_tag)
+                    })
+                }
+            }
+            FilterTagLogic::Or => {
+                // For OR logic:
+                // - Item matches if it's untagged (when "[Untagged]" is in filter) OR
+                // - Item matches if it has ANY of the regular filter tags
+                let matches_untagged = has_untagged_filter && is_untagged;
+                let matches_regular_tags = if regular_filter_tags.is_empty() {
+                    false
+                } else {
+                    regular_filter_tags.iter().any(|filter_tag| {
+                        item_tags_lower.contains(filter_tag)
+                    })
+                };
+                matches_untagged || matches_regular_tags
+            }
+        }
+    }
+}
+
