@@ -2,12 +2,12 @@ use ratatui::widgets::Tabs;
 use ratatui::style::{Style, Modifier};
 use ratatui::text::{Line, Span};
 use ratatui::Frame;
-use ratatui::layout::Rect;
-use crate::tui::app::Tab;
+use ratatui::layout::{Rect, Layout, Direction, Constraint};
+use crate::tui::app::{Tab, App};
 use crate::Config;
 use crate::tui::widgets::color::{parse_color, get_contrast_text_color};
 
-pub fn render_tabs(f: &mut Frame, area: Rect, current_tab: Tab, config: &Config) {
+pub fn render_tabs(f: &mut Frame, area: Rect, current_tab: Tab, config: &Config, app: &App) {
     let active_theme = config.get_active_theme();
     let highlight_bg = parse_color(&active_theme.highlight_bg);
     let fg_color = parse_color(&active_theme.fg);
@@ -44,6 +44,15 @@ pub fn render_tabs(f: &mut Frame, area: Rect, current_tab: Tab, config: &Config)
         Tab::Journal => 2,
     };
 
+    // Split area horizontally: tabs on left, notebook selector on right
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(0), Constraint::Length(25)]) // Notebook selector needs ~25 chars
+        .split(area);
+    
+    let tabs_area = horizontal[0];
+    let notebook_area = horizontal[1];
+    
     // Render tabs with space divider between boxes
     // Use contrast-aware text color for selected tab
     let highlight_fg = get_contrast_text_color(highlight_bg);
@@ -60,6 +69,35 @@ pub fn render_tabs(f: &mut Frame, area: Rect, current_tab: Tab, config: &Config)
         .divider("  ") // Space between tab boxes
         .padding("", "");
 
-    f.render_widget(tabs, area);
+    f.render_widget(tabs, tabs_area);
+    
+    // Render notebook selector on the right
+    let notebook_name = app.get_notebook_display_name(app.current_notebook_id);
+    let notebook_text = if app.mode == crate::tui::app::Mode::NotebookModal {
+        format!("Notebook: {} ▼", notebook_name)
+    } else {
+        format!("Notebook: {}", notebook_name)
+    };
+    
+    // Truncate if too long (using char count, not byte count, for safe UTF-8 handling)
+    let max_chars = notebook_area.width.saturating_sub(2) as usize;
+    let char_count = notebook_text.chars().count();
+    let display_text = if char_count > max_chars {
+        let truncate_to = max_chars.saturating_sub(3); // Reserve 3 chars for "..."
+        format!("{}...", notebook_text.chars().take(truncate_to).collect::<String>())
+    } else {
+        notebook_text
+    };
+    
+    let notebook_line = Line::from(vec![
+        Span::styled("  ", Style::default().bg(tab_bg)), // Left padding
+        Span::styled(display_text, Style::default().fg(tab_fg).bg(tab_bg)),
+        Span::styled("  ", Style::default().bg(tab_bg)), // Right padding
+    ]);
+    
+    use ratatui::widgets::Paragraph;
+    let notebook_widget = Paragraph::new(notebook_line)
+        .style(Style::default().fg(fg_color).bg(bg_color));
+    f.render_widget(notebook_widget, notebook_area);
 }
 

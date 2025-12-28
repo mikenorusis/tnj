@@ -7,6 +7,7 @@ use ratatui::Terminal;
 use std::io;
 use crate::tui::App;
 use crate::tui::error::TuiError;
+use crate::tui::widgets::editor::Editor;
 use crate::utils::parse_key_binding;
 
 /// Guard that ensures terminal state is restored even on panic
@@ -663,6 +664,231 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
         }
     }
 
+    // Handle notebook modal mode
+    if app.mode == crate::tui::app::Mode::NotebookModal {
+        match key_event.code {
+            KeyCode::Esc => {
+                app.exit_notebook_modal_mode();
+                return Ok(false);
+            }
+            _ => {
+                // Check if notebook modal binding is pressed again to toggle off
+                let notebook_modal_binding = parse_key_binding(&app.config.key_bindings.notebook_modal)
+                    .map_err(|e| TuiError::KeyBindingError(e))?;
+                if matches_key_event(key_event, &notebook_modal_binding) {
+                    app.exit_notebook_modal_mode();
+                    return Ok(false);
+                }
+            }
+        }
+
+        if let Some(ref mut state) = app.notebook_modal_state {
+            // Handle field navigation
+            match key_event.code {
+                KeyCode::Tab => {
+                    let forward = !key_event.modifiers.contains(KeyModifiers::SHIFT);
+                    app.navigate_notebook_modal(forward);
+                    return Ok(false);
+                }
+                KeyCode::BackTab => {
+                    app.navigate_notebook_modal(false);
+                    return Ok(false);
+                }
+                KeyCode::Up => {
+                    if matches!(state.current_field, crate::tui::app::NotebookModalField::NotebookList) {
+                        app.move_notebook_selection_up();
+                    }
+                    return Ok(false);
+                }
+                KeyCode::Down => {
+                    if matches!(state.current_field, crate::tui::app::NotebookModalField::NotebookList) {
+                        app.move_notebook_selection_down();
+                    }
+                    return Ok(false);
+                }
+                KeyCode::Enter => {
+                    // If in Add or Rename mode, save the notebook
+                    if matches!(state.mode, crate::tui::app::NotebookModalMode::Add | crate::tui::app::NotebookModalMode::Rename) {
+                        let name = if state.name_editor.lines.is_empty() {
+                            String::new()
+                        } else {
+                            state.name_editor.lines[0].clone()
+                        };
+                        
+                        let selected_idx = state.selected_index;
+                        let mode = state.mode.clone();
+                        let notebook_id_opt = if selected_idx > 0 {
+                            app.notebooks.get(selected_idx - 1).and_then(|n| n.id)
+                        } else {
+                            None
+                        };
+                        
+                        // Release the borrow on state by ending the if let block
+                        // We'll re-borrow after calling methods
+                        
+                        match mode {
+                            crate::tui::app::NotebookModalMode::Add => {
+                                if let Err(e) = app.add_notebook(name) {
+                                    app.set_status_message(format!("Failed to add notebook: {}", e));
+                                } else {
+                                    // Reload notebooks
+                                    app.notebooks = app.database.get_all_notebooks().unwrap_or_default();
+                                    if let Some(ref mut new_state) = app.notebook_modal_state {
+                                        new_state.mode = crate::tui::app::NotebookModalMode::View;
+                                        new_state.name_editor = Editor::new();
+                                    }
+                                }
+                            }
+                            crate::tui::app::NotebookModalMode::Rename => {
+                                if let Some(id) = notebook_id_opt {
+                                    if let Err(e) = app.rename_notebook(id, name) {
+                                        app.set_status_message(format!("Failed to rename notebook: {}", e));
+                                    } else {
+                                        // Reload notebooks
+                                        app.notebooks = app.database.get_all_notebooks().unwrap_or_default();
+                                        if let Some(ref mut new_state) = app.notebook_modal_state {
+                                            new_state.mode = crate::tui::app::NotebookModalMode::View;
+                                            new_state.name_editor = Editor::new();
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                        return Ok(false);
+                    }
+                    
+                    // Otherwise, handle field actions
+                    match state.current_field {
+                        crate::tui::app::NotebookModalField::Add => {
+                            state.mode = crate::tui::app::NotebookModalMode::Add;
+                            state.name_editor = Editor::new();
+                        }
+                        crate::tui::app::NotebookModalField::Rename => {
+                            if state.selected_index > 0 {
+                                // Can't rename "[None]"
+                                let notebook_id = app.notebooks.get(state.selected_index - 1)
+                                    .and_then(|n| n.id);
+                                if let Some(id) = notebook_id {
+                                    state.mode = crate::tui::app::NotebookModalMode::Rename;
+                                    state.name_editor = Editor::from_string(
+                                        app.notebooks.iter()
+                                            .find(|n| n.id == Some(id))
+                                            .map(|n| n.name.clone())
+                                            .unwrap_or_default()
+                                    );
+                                }
+                            }
+                        }
+                        crate::tui::app::NotebookModalField::Delete => {
+                            if state.selected_index > 0 {
+                                // Can't delete "[None]"
+                                let notebook_id = app.notebooks.get(state.selected_index - 1)
+                                    .and_then(|n| n.id);
+                                if let Some(id) = notebook_id {
+                                    let selected_idx = state.selected_index;
+                                    
+                                    // Release the borrow on state by ending the if let block
+                                    
+                                    if let Err(e) = app.delete_notebook(id) {
+                                        app.set_status_message(format!("Failed to delete notebook: {}", e));
+                                    } else {
+                                        // Reload notebooks and reset selection
+                                        app.notebooks = app.database.get_all_notebooks().unwrap_or_default();
+                                        if let Some(ref mut new_state) = app.notebook_modal_state {
+                                            if selected_idx > app.notebooks.len() {
+                                                new_state.selected_index = app.notebooks.len();
+                                            }
+                                            new_state.list_state.select(Some(new_state.selected_index));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        crate::tui::app::NotebookModalField::Switch => {
+                            let notebook_id = if state.selected_index == 0 {
+                                None // "[None]"
+                            } else {
+                                app.notebooks.get(state.selected_index - 1)
+                                    .and_then(|n| n.id)
+                            };
+                            if let Err(e) = app.switch_notebook(notebook_id) {
+                                app.set_status_message(format!("Failed to switch notebook: {}", e));
+                            } else {
+                                app.exit_notebook_modal_mode();
+                            }
+                            return Ok(false);
+                        }
+                        crate::tui::app::NotebookModalField::NotebookList => {
+                            // Switch to the selected notebook
+                            let notebook_id = if state.selected_index == 0 {
+                                None // "[None]"
+                            } else {
+                                app.notebooks.get(state.selected_index - 1)
+                                    .and_then(|n| n.id)
+                            };
+                            if let Err(e) = app.switch_notebook(notebook_id) {
+                                app.set_status_message(format!("Failed to switch notebook: {}", e));
+                            } else {
+                                app.exit_notebook_modal_mode();
+                            }
+                            return Ok(false);
+                        }
+                    }
+                    return Ok(false);
+                }
+                _ => {
+                    // Handle text input for add/rename mode
+                    if matches!(state.mode, crate::tui::app::NotebookModalMode::Add | crate::tui::app::NotebookModalMode::Rename) {
+                        let undo_binding = parse_key_binding(&app.config.key_bindings.undo)
+                            .map_err(|e| TuiError::KeyBindingError(e))?;
+                        
+                        if let Some(ref mut editor) = app.get_notebook_modal_editor() {
+                            if matches_key_event(key_event, &undo_binding) {
+                                editor.undo();
+                                return Ok(false);
+                            }
+                            
+                            let extend_selection = key_event.modifiers.contains(KeyModifiers::SHIFT);
+                            
+                            match key_event.code {
+                                KeyCode::Char(c) => {
+                                    if crate::utils::has_primary_modifier(key_event.modifiers) {
+                                        return Ok(false);
+                                    }
+                                    editor.insert_char(c);
+                                    return Ok(false);
+                                }
+                                KeyCode::Backspace => {
+                                    editor.delete_char();
+                                    return Ok(false);
+                                }
+                                KeyCode::Left => {
+                                    editor.move_cursor_left(extend_selection);
+                                    return Ok(false);
+                                }
+                                KeyCode::Right => {
+                                    editor.move_cursor_right(extend_selection);
+                                    return Ok(false);
+                                }
+                                KeyCode::Home => {
+                                    editor.move_cursor_home(extend_selection);
+                                    return Ok(false);
+                                }
+                                KeyCode::End => {
+                                    editor.move_cursor_end(extend_selection);
+                                    return Ok(false);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return Ok(false);
+    }
+
     // Handle search mode
     if app.mode == crate::tui::app::Mode::Search {
         match key_event.code {
@@ -1258,6 +1484,18 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
         .map_err(|e| TuiError::KeyBindingError(e))?;
     if matches_key_event(key_event, &toggle_list_view_binding) {
         app.toggle_list_view_mode();
+        return Ok(false);
+    }
+
+    // Check for notebook modal binding
+    let notebook_modal_binding = parse_key_binding(&app.config.key_bindings.notebook_modal)
+        .map_err(|e| TuiError::KeyBindingError(e))?;
+    if matches_key_event(key_event, &notebook_modal_binding) {
+        if app.mode == crate::tui::app::Mode::NotebookModal {
+            app.exit_notebook_modal_mode();
+        } else {
+            app.enter_notebook_modal_mode();
+        }
         return Ok(false);
     }
 

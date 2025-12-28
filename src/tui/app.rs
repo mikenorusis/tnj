@@ -1,4 +1,4 @@
-use crate::{Config, Database, models::{Task, Note, JournalEntry}};
+use crate::{Config, Database, models::{Task, Note, JournalEntry, Notebook}};
 use crate::database::DatabaseError;
 use crate::tui::widgets::editor::Editor;
 use ratatui::widgets::ListState;
@@ -65,6 +65,32 @@ pub struct FilterFormState {
     pub tag_logic_index: usize, // 0=AND, 1=OR
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotebookModalMode {
+    View,
+    Add,
+    Rename,
+    Delete,
+}
+
+#[derive(Debug, Clone)]
+pub enum NotebookModalField {
+    NotebookList,
+    Add,
+    Rename,
+    Delete,
+    Switch,
+}
+
+#[derive(Debug, Clone)]
+pub struct NotebookModalState {
+    pub mode: NotebookModalMode,
+    pub selected_index: usize, // 0 = "[None]", 1+ = actual notebooks
+    pub name_editor: Editor,
+    pub list_state: ListState,
+    pub current_field: NotebookModalField,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mode {
     View,
@@ -74,6 +100,7 @@ pub enum Mode {
     Settings,
     MarkdownHelp,
     Filter,
+    NotebookModal,
 }
 
 #[derive(Debug, Clone)]
@@ -178,6 +205,9 @@ pub struct App {
     pub filter_task_status: Option<FilterTaskStatus>, // Todo/Done/All filter (task-specific)
     pub filter_tag_logic: FilterTagLogic, // AND/OR for tag matching
     pub filter_mode_state: Option<FilterFormState>, // State for filter modal editing
+    pub current_notebook_id: Option<i64>, // Currently selected notebook (None = "[None]")
+    pub notebooks: Vec<Notebook>, // List of all notebooks (does NOT include "[None]" - it's virtual)
+    pub notebook_modal_state: Option<NotebookModalState>, // State for notebook management modal
 }
 
 impl App {
@@ -188,6 +218,21 @@ impl App {
             "TwoLine" => ListViewMode::TwoLine,
             "GroupedByTags" => ListViewMode::GroupedByTags,
             _ => ListViewMode::Simple,
+        };
+        
+        // Load notebooks from database
+        let notebooks = database.get_all_notebooks()?;
+        
+        // If no notebooks exist, create a "Default" notebook
+        let notebooks = if notebooks.is_empty() {
+            let default_notebook = Notebook::new("Default".to_string());
+            let notebook_id = database.insert_notebook(&default_notebook)?;
+            vec![Notebook {
+                id: Some(notebook_id),
+                ..default_notebook
+            }]
+        } else {
+            notebooks
         };
         
         let mut app = Self {
@@ -223,6 +268,9 @@ impl App {
             filter_task_status: None,
             filter_tag_logic: FilterTagLogic::And,
             filter_mode_state: None,
+            current_notebook_id: None, // Start with "[None]" selected
+            notebooks,
+            notebook_modal_state: None,
         };
         
         app.load_data()?;
@@ -2076,6 +2124,200 @@ impl App {
             self.settings_display_mode_index = index;
         } else {
             self.settings_display_mode_index = 0;
+        }
+    }
+
+    /// Get display name for a notebook (returns "[None]" if None)
+    pub fn get_notebook_display_name(&self, id: Option<i64>) -> String {
+        if let Some(notebook_id) = id {
+            self.notebooks
+                .iter()
+                .find(|n| n.id == Some(notebook_id))
+                .map(|n| n.name.clone())
+                .unwrap_or_else(|| "[None]".to_string())
+        } else {
+            "[None]".to_string()
+        }
+    }
+
+    /// Get notebook list with "[None]" first
+    pub fn get_notebook_list_with_none(&self) -> Vec<(Option<i64>, String)> {
+        let mut list = vec![(None, "[None]".to_string())];
+        for notebook in &self.notebooks {
+            if let Some(id) = notebook.id {
+                list.push((Some(id), notebook.name.clone()));
+            }
+        }
+        list
+    }
+
+    /// Enter notebook modal mode
+    pub fn enter_notebook_modal_mode(&mut self) {
+        // Find the index of the current notebook in the list (0 = "[None]", 1+ = actual notebooks)
+        let selected_index = if let Some(current_id) = self.current_notebook_id {
+            self.notebooks
+                .iter()
+                .position(|n| n.id == Some(current_id))
+                .map(|idx| idx + 1) // +1 because "[None]" is at index 0
+                .unwrap_or(0)
+        } else {
+            0 // "[None]" is selected
+        };
+
+        self.notebook_modal_state = Some(NotebookModalState {
+            mode: NotebookModalMode::View,
+            selected_index,
+            name_editor: Editor::new(),
+            list_state: ListState::default(),
+            current_field: NotebookModalField::NotebookList,
+        });
+        self.notebook_modal_state.as_mut().unwrap().list_state.select(Some(selected_index));
+        self.mode = Mode::NotebookModal;
+    }
+
+    /// Exit notebook modal mode
+    pub fn exit_notebook_modal_mode(&mut self) {
+        self.mode = Mode::View;
+        self.notebook_modal_state = None;
+    }
+
+    /// Switch to a different notebook
+    pub fn switch_notebook(&mut self, id: Option<i64>) -> Result<(), DatabaseError> {
+        self.current_notebook_id = id;
+        self.set_status_message(format!("Switched to notebook: {}", self.get_notebook_display_name(id)));
+        Ok(())
+    }
+
+    /// Add a new notebook
+    pub fn add_notebook(&mut self, name: String) -> Result<(), DatabaseError> {
+        if name.trim().is_empty() {
+            self.set_status_message("Notebook name cannot be empty".to_string());
+            return Ok(());
+        }
+
+        // Check for duplicate names
+        if self.notebooks.iter().any(|n| n.name == name.trim()) {
+            self.set_status_message("A notebook with this name already exists".to_string());
+            return Ok(());
+        }
+
+        let mut notebook = Notebook::new(name.trim().to_string());
+        let notebook_id = self.database.insert_notebook(&notebook)?;
+        notebook.id = Some(notebook_id);
+        self.notebooks.push(notebook);
+        self.notebooks.sort_by(|a, b| a.name.cmp(&b.name));
+        
+        // Reload to ensure consistency
+        self.notebooks = self.database.get_all_notebooks()?;
+        
+        self.set_status_message("Notebook created".to_string());
+        Ok(())
+    }
+
+    /// Rename a notebook
+    pub fn rename_notebook(&mut self, id: i64, new_name: String) -> Result<(), DatabaseError> {
+        if new_name.trim().is_empty() {
+            self.set_status_message("Notebook name cannot be empty".to_string());
+            return Ok(());
+        }
+
+        // Check for duplicate names (excluding the current notebook)
+        if self.notebooks.iter().any(|n| n.id != Some(id) && n.name == new_name.trim()) {
+            self.set_status_message("A notebook with this name already exists".to_string());
+            return Ok(());
+        }
+
+        if let Some(notebook) = self.notebooks.iter_mut().find(|n| n.id == Some(id)) {
+            notebook.name = new_name.trim().to_string();
+            notebook.updated_at = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+            self.database.update_notebook(notebook)?;
+            
+            // Reload to ensure consistency
+            self.notebooks = self.database.get_all_notebooks()?;
+            
+            self.set_status_message("Notebook renamed".to_string());
+        } else {
+            self.set_status_message("Notebook not found".to_string());
+        }
+        Ok(())
+    }
+
+    /// Delete a notebook
+    pub fn delete_notebook(&mut self, id: i64) -> Result<(), DatabaseError> {
+        // Check if this is the current notebook
+        if self.current_notebook_id == Some(id) {
+            // Switch to "[None]" before deleting
+            self.current_notebook_id = None;
+        }
+
+        self.database.delete_notebook(id)?;
+        
+        // Remove from local list
+        self.notebooks.retain(|n| n.id != Some(id));
+        
+        // Reload to ensure consistency
+        self.notebooks = self.database.get_all_notebooks()?;
+        
+        self.set_status_message("Notebook deleted".to_string());
+        Ok(())
+    }
+
+    /// Navigate notebook modal fields
+    pub fn navigate_notebook_modal(&mut self, forward: bool) {
+        if let Some(ref mut state) = self.notebook_modal_state {
+            let fields = vec![
+                NotebookModalField::NotebookList,
+                NotebookModalField::Add,
+                NotebookModalField::Rename,
+                NotebookModalField::Delete,
+                NotebookModalField::Switch,
+            ];
+            
+            let current_idx = fields.iter()
+                .position(|f| std::mem::discriminant(f) == std::mem::discriminant(&state.current_field))
+                .unwrap_or(0);
+            
+            let new_idx = if forward {
+                (current_idx + 1) % fields.len()
+            } else {
+                (current_idx + fields.len() - 1) % fields.len()
+            };
+            
+            state.current_field = fields[new_idx].clone();
+        }
+    }
+
+    /// Move notebook selection up
+    pub fn move_notebook_selection_up(&mut self) {
+        if let Some(ref mut state) = self.notebook_modal_state {
+            if state.selected_index > 0 {
+                state.selected_index -= 1;
+                state.list_state.select(Some(state.selected_index));
+            }
+        }
+    }
+
+    /// Move notebook selection down
+    pub fn move_notebook_selection_down(&mut self) {
+        if let Some(ref mut state) = self.notebook_modal_state {
+            let max_index = self.notebooks.len(); // "[None]" + notebooks
+            if state.selected_index < max_index {
+                state.selected_index += 1;
+                state.list_state.select(Some(state.selected_index));
+            }
+        }
+    }
+
+    /// Get current notebook modal editor (for add/rename)
+    pub fn get_notebook_modal_editor(&mut self) -> Option<&mut Editor> {
+        if let Some(ref mut state) = self.notebook_modal_state {
+            if matches!(state.mode, NotebookModalMode::Add | NotebookModalMode::Rename) {
+                Some(&mut state.name_editor)
+            } else {
+                None
+            }
+        } else {
+            None
         }
     }
 }

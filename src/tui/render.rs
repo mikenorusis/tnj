@@ -32,7 +32,7 @@ pub fn render(f: &mut Frame, app: &mut App, layout: &Layout) {
 
     // Render tabs - following ratatui example: tabs render in 1 line without Block
     // Content areas below have borders that visually connect
-    render_tabs(f, layout.tabs_area, app.current_tab, &app.config);
+    render_tabs(f, layout.tabs_area, app.current_tab, &app.config, app);
 
     // Render sidebar if not collapsed
     if app.sidebar_state == crate::tui::app::SidebarState::Expanded && layout.sidebar_area.width > 0 {
@@ -83,7 +83,7 @@ pub fn render(f: &mut Frame, app: &mut App, layout: &Layout) {
     // Render main pane (always render normal content first)
     // Note: Help mode and Settings mode render popup overlays separately after normal content
     match app.mode {
-            crate::tui::app::Mode::Help | crate::tui::app::Mode::View | crate::tui::app::Mode::Filter => {
+            crate::tui::app::Mode::Help | crate::tui::app::Mode::View | crate::tui::app::Mode::Filter | crate::tui::app::Mode::NotebookModal => {
                 // View mode - show selected item details (Help mode shows same content with overlay)
                 if let Some(ref item) = app.selected_item {
                     render_item_view(f, layout.main_area, item, &app.config, app.item_view_scroll);
@@ -182,6 +182,12 @@ pub fn render(f: &mut Frame, app: &mut App, layout: &Layout) {
         render_filter_modal(f, f.area(), app);
     }
 
+    // Render notebook modal overlay if in notebook modal mode (after normal content)
+    if app.mode == crate::tui::app::Mode::NotebookModal {
+        use crate::tui::widgets::notebook_modal::render_notebook_modal;
+        render_notebook_modal(f, f.area(), app);
+    }
+
     // Render status bar
     let key_hints = get_key_hints(app);
     render_status_bar(f, layout.status_area, app.status_message.as_ref(), &key_hints, &app.config);
@@ -230,6 +236,15 @@ fn get_key_hints(app: &App) -> Vec<String> {
                 "Esc: Cancel".to_string(),
             ]
         }
+        crate::tui::app::Mode::NotebookModal => {
+            vec![
+                "Tab/Shift+Tab: Navigate actions".to_string(),
+                "↑/↓: Navigate notebooks".to_string(),
+                format!("{}: Select/Switch", crate::utils::format_key_binding_for_display(&app.config.key_bindings.select)),
+                format!("{}: Open notebook modal", crate::utils::format_key_binding_for_display(&app.config.key_bindings.notebook_modal)),
+                "Esc: Cancel".to_string(),
+            ]
+        }
         _ => {
             let mut hints = vec![
                 format!("{}: Quit", crate::utils::format_key_binding_for_display(&app.config.key_bindings.quit)),
@@ -255,6 +270,9 @@ fn get_key_hints(app: &App) -> Vec<String> {
             
             // Add tags toggle hint (available on all tabs)
             hints.push(format!("{}: Tags", crate::utils::format_key_binding_for_display(&app.config.key_bindings.toggle_list_view)));
+            
+            // Add notebook modal hint
+            hints.push(format!("{}: Notebooks", crate::utils::format_key_binding_for_display(&app.config.key_bindings.notebook_modal)));
             
             // Add F1 (Help) and F2 (Settings) at the end
             hints.push(format!("{}: Settings", crate::utils::format_key_binding_for_display(&app.config.key_bindings.settings)));

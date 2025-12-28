@@ -15,4 +15,5 @@ pub mod settings_view;
 pub mod tags;
 pub mod filters_box;
 pub mod filter_modal;
+pub mod notebook_modal;
 

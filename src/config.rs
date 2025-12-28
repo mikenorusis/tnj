@@ -72,6 +72,8 @@ pub struct KeyBindings {
     pub toggle_list_view: String,
     #[serde(default = "default_filter")]
     pub filter: String,
+    #[serde(default = "default_notebook_modal")]
+    pub notebook_modal: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,6 +138,7 @@ impl Default for KeyBindings {
             toggle_task_status: default_toggle_task_status(),
             toggle_list_view: default_toggle_list_view(),
             filter: default_filter(),
+            notebook_modal: default_notebook_modal(),
         }
     }
 }
@@ -307,6 +310,10 @@ fn default_toggle_list_view() -> String {
 
 fn default_filter() -> String {
     "f".to_string()
+}
+
+fn default_notebook_modal() -> String {
+    "Ctrl+n".to_string()
 }
 
 fn default_fg() -> String {

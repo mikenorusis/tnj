@@ -2,7 +2,7 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 use thiserror::Error;
 
-use crate::models::{Task, Note, JournalEntry};
+use crate::models::{Task, Note, JournalEntry, Notebook};
 
 #[derive(Debug, Error)]
 pub enum DatabaseError {
@@ -40,18 +40,6 @@ impl Database {
 
     /// Initialize the database schema (tables and indexes)
     fn initialize_schema(&self) -> Result<(), DatabaseError> {
-        // Check if all tables already exist
-        let table_count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('tasks', 'notes', 'journals')",
-            [],
-            |row| row.get(0),
-        )?;
-
-        if table_count == 3 {
-            // All tables already exist, skip initialization
-            return Ok(());
-        }
-
         // Create tasks table
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS tasks (
@@ -98,6 +86,17 @@ impl Database {
             [],
         )?;
 
+        // Create notebooks table
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS notebooks (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            TEXT NOT NULL,
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT NOT NULL
+            )",
+            [],
+        )?;
+
         // Create indexes
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date)",
@@ -121,6 +120,11 @@ impl Database {
 
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_journals_title ON journals(title)",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_notebooks_name ON notebooks(name)",
             [],
         )?;
 
@@ -565,6 +569,108 @@ impl Database {
         )?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Get all notebooks ordered by name ASC
+    pub fn get_all_notebooks(&self) -> Result<Vec<Notebook>, DatabaseError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, created_at, updated_at
+             FROM notebooks ORDER BY name ASC"
+        )?;
+        
+        let notebooks = stmt.query_map([], |row| {
+            Ok(Notebook {
+                id: Some(row.get(0)?),
+                name: row.get(1)?,
+                created_at: row.get(2)?,
+                updated_at: row.get(3)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+        
+        Ok(notebooks)
+    }
+
+    /// Get a single notebook by ID
+    pub fn get_notebook(&self, id: i64) -> Result<Notebook, DatabaseError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, created_at, updated_at
+             FROM notebooks WHERE id = ?1"
+        )?;
+        
+        stmt.query_row(rusqlite::params![id], |row| {
+            Ok(Notebook {
+                id: Some(row.get(0)?),
+                name: row.get(1)?,
+                created_at: row.get(2)?,
+                updated_at: row.get(3)?,
+            })
+        })
+        .map_err(DatabaseError::from)
+    }
+
+    /// Insert a notebook into the database and return its ID
+    pub fn insert_notebook(&self, notebook: &Notebook) -> Result<i64, DatabaseError> {
+        self.conn.execute(
+            "INSERT INTO notebooks (name, created_at, updated_at)
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params![
+                notebook.name,
+                notebook.created_at,
+                notebook.updated_at
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Update an existing notebook
+    pub fn update_notebook(&self, notebook: &Notebook) -> Result<(), DatabaseError> {
+        let id = notebook.id.ok_or_else(|| DatabaseError::SqliteError(
+            rusqlite::Error::InvalidColumnType(0, "id".to_string(), rusqlite::types::Type::Null)
+        ))?;
+        
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "UPDATE notebooks SET name = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![
+                notebook.name,
+                notebook.updated_at,
+                id
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Delete a notebook by ID
+    pub fn delete_notebook(&self, id: i64) -> Result<(), DatabaseError> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM notebooks WHERE id = ?1", rusqlite::params![id])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Get the first notebook (for default)
+    pub fn get_default_notebook(&self) -> Result<Option<Notebook>, DatabaseError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, created_at, updated_at
+             FROM notebooks ORDER BY name ASC LIMIT 1"
+        )?;
+        
+        let result = stmt.query_row([], |row| {
+            Ok(Notebook {
+                id: Some(row.get(0)?),
+                name: row.get(1)?,
+                created_at: row.get(2)?,
+                updated_at: row.get(3)?,
+            })
+        });
+        
+        match result {
+            Ok(notebook) => Ok(Some(notebook)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(DatabaseError::from(e)),
+        }
     }
 }
 

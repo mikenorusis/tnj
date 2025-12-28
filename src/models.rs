@@ -86,3 +86,23 @@ impl JournalEntry {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Notebook {
+    pub id: Option<i64>,
+    pub name: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl Notebook {
+    pub fn new(name: String) -> Self {
+        let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        Self {
+            id: None,
+            name,
+            created_at: now.clone(),
+            updated_at: now,
+        }
+    }
+}
+
