@@ -464,6 +464,116 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
             return Ok(false);
         }
 
+        // Check for notebook field navigation (up/down arrows)
+        // Tab/Shift+Tab should still work to navigate away from notebook field
+        if app.is_notebook_field_active() {
+            match key_event.code {
+                KeyCode::Up => {
+                    if let Some(ref mut form) = app.create_form {
+                        match form {
+                            crate::tui::app::CreateForm::Task(task_form) => {
+                                if task_form.notebook_selected_index > 0 {
+                                    task_form.notebook_selected_index -= 1;
+                                    task_form.notebook_id = if task_form.notebook_selected_index == 0 {
+                                        None
+                                    } else {
+                                        app.notebooks.get(task_form.notebook_selected_index - 1)
+                                            .and_then(|n| n.id)
+                                    };
+                                }
+                            }
+                            crate::tui::app::CreateForm::Note(note_form) => {
+                                if note_form.notebook_selected_index > 0 {
+                                    note_form.notebook_selected_index -= 1;
+                                    note_form.notebook_id = if note_form.notebook_selected_index == 0 {
+                                        None
+                                    } else {
+                                        app.notebooks.get(note_form.notebook_selected_index - 1)
+                                            .and_then(|n| n.id)
+                                    };
+                                }
+                            }
+                            crate::tui::app::CreateForm::Journal(journal_form) => {
+                                if journal_form.notebook_selected_index > 0 {
+                                    journal_form.notebook_selected_index -= 1;
+                                    journal_form.notebook_id = if journal_form.notebook_selected_index == 0 {
+                                        None
+                                    } else {
+                                        app.notebooks.get(journal_form.notebook_selected_index - 1)
+                                            .and_then(|n| n.id)
+                                    };
+                                }
+                            }
+                        }
+                    }
+                    return Ok(false);
+                }
+                KeyCode::Down => {
+                    if let Some(ref mut form) = app.create_form {
+                        // max_valid_index is app.notebooks.len() (the last valid index)
+                        // Index 0 = "[None]", indices 1..=len() = notebooks
+                        // So if we have 3 notebooks, valid indices are 0, 1, 2, 3
+                        // We use len() + 1 for the comparison to allow reaching index len()
+                        let max_valid_index = app.notebooks.len();
+                        let max_index_for_check = app.notebooks.len() + 1;
+                        match form {
+                            crate::tui::app::CreateForm::Task(task_form) => {
+                                if task_form.notebook_selected_index < max_index_for_check {
+                                    task_form.notebook_selected_index += 1;
+                                    // Clamp to maximum valid index to prevent going out of bounds
+                                    if task_form.notebook_selected_index > max_valid_index {
+                                        task_form.notebook_selected_index = max_valid_index;
+                                    }
+                                    task_form.notebook_id = if task_form.notebook_selected_index == 0 {
+                                        None
+                                    } else {
+                                        app.notebooks.get(task_form.notebook_selected_index - 1)
+                                            .and_then(|n| n.id)
+                                    };
+                                }
+                            }
+                            crate::tui::app::CreateForm::Note(note_form) => {
+                                if note_form.notebook_selected_index < max_index_for_check {
+                                    note_form.notebook_selected_index += 1;
+                                    // Clamp to maximum valid index to prevent going out of bounds
+                                    if note_form.notebook_selected_index > max_valid_index {
+                                        note_form.notebook_selected_index = max_valid_index;
+                                    }
+                                    note_form.notebook_id = if note_form.notebook_selected_index == 0 {
+                                        None
+                                    } else {
+                                        app.notebooks.get(note_form.notebook_selected_index - 1)
+                                            .and_then(|n| n.id)
+                                    };
+                                }
+                            }
+                            crate::tui::app::CreateForm::Journal(journal_form) => {
+                                if journal_form.notebook_selected_index < max_index_for_check {
+                                    journal_form.notebook_selected_index += 1;
+                                    // Clamp to maximum valid index to prevent going out of bounds
+                                    if journal_form.notebook_selected_index > max_valid_index {
+                                        journal_form.notebook_selected_index = max_valid_index;
+                                    }
+                                    journal_form.notebook_id = if journal_form.notebook_selected_index == 0 {
+                                        None
+                                    } else {
+                                        app.notebooks.get(journal_form.notebook_selected_index - 1)
+                                            .and_then(|n| n.id)
+                                    };
+                                }
+                            }
+                        }
+                    }
+                    return Ok(false);
+                }
+                // Allow Tab/Shift+Tab to pass through for field navigation
+                KeyCode::Tab | KeyCode::BackTab => {
+                    // Let the Tab handling code below handle this
+                }
+                _ => {}
+            }
+        }
+
         // Check for Tab/Shift+Tab/Enter for field navigation
         // Enter behavior: insert newline if Content field is active, otherwise navigate to next field
         match key_event.code {
@@ -675,7 +785,25 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                 // Check if notebook modal binding is pressed again to toggle off
                 let notebook_modal_binding = parse_key_binding(&app.config.key_bindings.notebook_modal)
                     .map_err(|e| TuiError::KeyBindingError(e))?;
-                if matches_key_event(key_event, &notebook_modal_binding) {
+                let mut is_notebook_modal = matches_key_event(key_event, &notebook_modal_binding);
+                
+                // On macOS, Option+n may produce a special character (like '˜') without ALT modifier
+                // Check for this case before the character gets inserted into the editor
+                #[cfg(target_os = "macos")]
+                {
+                    if !is_notebook_modal {
+                        is_notebook_modal = match key_event.code {
+                            KeyCode::Char(c) => {
+                                // Option+n on macOS typically produces '˜' (U+02DC, small tilde)
+                                // Also check for regular tilde '~' (U+007E) depending on keyboard layout
+                                c == '˜' || c == '~'
+                            }
+                            _ => false,
+                        };
+                    }
+                }
+                
+                if is_notebook_modal {
                     app.exit_notebook_modal_mode();
                     return Ok(false);
                 }
@@ -1149,6 +1277,36 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
         return Ok(false);
     }
 
+    // Check for notebook modal binding - process early to catch Option+n before other handlers
+    let notebook_modal_binding = parse_key_binding(&app.config.key_bindings.notebook_modal)
+        .map_err(|e| TuiError::KeyBindingError(e))?;
+    let mut is_notebook_modal = matches_key_event(key_event, &notebook_modal_binding);
+    
+    // On macOS, Option+n may produce a special character (like '˜') without ALT modifier
+    // Check for this case before the character gets inserted into the editor
+    #[cfg(target_os = "macos")]
+    {
+        if !is_notebook_modal {
+            is_notebook_modal = match key_event.code {
+                KeyCode::Char(c) => {
+                    // Option+n on macOS typically produces '˜' (U+02DC, small tilde)
+                    // Also check for regular tilde '~' (U+007E) depending on keyboard layout
+                    c == '˜' || c == '~'
+                }
+                _ => false,
+            };
+        }
+    }
+    
+    if is_notebook_modal {
+        if app.mode == crate::tui::app::Mode::NotebookModal {
+            app.exit_notebook_modal_mode();
+        } else {
+            app.enter_notebook_modal_mode();
+        }
+        return Ok(false);
+    }
+
     // Check for tab navigation - process these early and return to prevent double-processing
     let tab_left_binding = parse_key_binding(&app.config.key_bindings.tab_left)
         .map_err(|e| TuiError::KeyBindingError(e))?;
@@ -1484,18 +1642,6 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
         .map_err(|e| TuiError::KeyBindingError(e))?;
     if matches_key_event(key_event, &toggle_list_view_binding) {
         app.toggle_list_view_mode();
-        return Ok(false);
-    }
-
-    // Check for notebook modal binding
-    let notebook_modal_binding = parse_key_binding(&app.config.key_bindings.notebook_modal)
-        .map_err(|e| TuiError::KeyBindingError(e))?;
-    if matches_key_event(key_event, &notebook_modal_binding) {
-        if app.mode == crate::tui::app::Mode::NotebookModal {
-            app.exit_notebook_modal_mode();
-        } else {
-            app.enter_notebook_modal_mode();
-        }
         return Ok(false);
     }
 

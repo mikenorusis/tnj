@@ -114,13 +114,13 @@ pub fn render(f: &mut Frame, app: &mut App, layout: &Layout) {
                 if let Some(ref form) = app.create_form {
                     match form {
                         crate::tui::app::CreateForm::Task(task_form) => {
-                            render_task_form(f, layout.main_area, task_form, &app.config);
+                            render_task_form(f, layout.main_area, task_form, &app.config, &app.notebooks);
                         }
                         crate::tui::app::CreateForm::Note(note_form) => {
-                            render_note_form(f, layout.main_area, note_form, &app.config);
+                            render_note_form(f, layout.main_area, note_form, &app.config, &app.notebooks);
                         }
                         crate::tui::app::CreateForm::Journal(journal_form) => {
-                            render_journal_form(f, layout.main_area, journal_form, &app.config);
+                            render_journal_form(f, layout.main_area, journal_form, &app.config, &app.notebooks);
                         }
                     }
                 } else {

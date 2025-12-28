@@ -119,12 +119,14 @@ pub enum TaskField {
     Description,
     DueDate,
     Tags,
+    Notebook,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoteField {
     Title,
     Tags,
+    Notebook,
     Content,
 }
 
@@ -133,6 +135,7 @@ pub enum JournalField {
     Date,
     Title,
     Tags,
+    Notebook,
     Content,
 }
 
@@ -143,6 +146,8 @@ pub struct TaskForm {
     pub description: Editor,
     pub due_date: Editor,
     pub tags: Editor,
+    pub notebook_id: Option<i64>,
+    pub notebook_selected_index: usize, // 0 = "[None]", 1+ = actual notebooks
     pub editing_item_id: Option<i64>, // None for new items, Some(id) for editing
 }
 
@@ -152,6 +157,8 @@ pub struct NoteForm {
     pub title: Editor,
     pub content: Editor,
     pub tags: Editor,
+    pub notebook_id: Option<i64>,
+    pub notebook_selected_index: usize, // 0 = "[None]", 1+ = actual notebooks
     pub editing_item_id: Option<i64>, // None for new items, Some(id) for editing
 }
 
@@ -162,6 +169,8 @@ pub struct JournalForm {
     pub title: Editor,
     pub content: Editor,
     pub tags: Editor,
+    pub notebook_id: Option<i64>,
+    pub notebook_selected_index: usize, // 0 = "[None]", 1+ = actual notebooks
     pub editing_item_id: Option<i64>, // None for new items, Some(id) for editing
 }
 
@@ -285,13 +294,13 @@ impl App {
         let need_archived = matches!(self.filter_archived, Some(FilterArchivedStatus::Archived) | Some(FilterArchivedStatus::All));
         
         if need_archived {
-            self.tasks = self.database.get_all_tasks_including_archived()?;
-            self.notes = self.database.get_all_notes_including_archived()?;
-            self.journals = self.database.get_all_journals_including_archived()?;
+            self.tasks = self.database.get_all_tasks_including_archived(self.current_notebook_id)?;
+            self.notes = self.database.get_all_notes_including_archived(self.current_notebook_id)?;
+            self.journals = self.database.get_all_journals_including_archived(self.current_notebook_id)?;
         } else {
-            self.tasks = self.database.get_all_tasks()?;
-            self.notes = self.database.get_all_notes()?;
-            self.journals = self.database.get_all_journals()?;
+            self.tasks = self.database.get_all_tasks(self.current_notebook_id)?;
+            self.notes = self.database.get_all_notes(self.current_notebook_id)?;
+            self.journals = self.database.get_all_journals(self.current_notebook_id)?;
         }
         
         // Assign order values to tasks that don't have them (migration)
@@ -311,9 +320,9 @@ impl App {
             }
             // Reload to get updated data, respecting the archived filter
             if need_archived {
-                self.tasks = self.database.get_all_tasks_including_archived()?;
+                self.tasks = self.database.get_all_tasks_including_archived(self.current_notebook_id)?;
             } else {
-                self.tasks = self.database.get_all_tasks()?;
+                self.tasks = self.database.get_all_tasks(self.current_notebook_id)?;
             }
         }
         
@@ -1265,31 +1274,43 @@ impl App {
         if let Some(ref item) = self.selected_item {
             let form = match item {
                 SelectedItem::Task(task) => {
+                    let notebook_id = task.notebook_id;
+                    let notebook_selected_index = self.get_notebook_index_for_id(notebook_id);
                     CreateForm::Task(TaskForm {
                         current_field: TaskField::Title,
                         title: Editor::from_string(task.title.clone()),
                         description: Editor::from_string(task.description.clone().unwrap_or_default()),
                         due_date: Editor::from_string(task.due_date.clone().unwrap_or_default()),
                         tags: Editor::from_string(task.tags.clone().unwrap_or_default()),
+                        notebook_id,
+                        notebook_selected_index,
                         editing_item_id: task.id,
                     })
                 }
                 SelectedItem::Note(note) => {
+                    let notebook_id = note.notebook_id;
+                    let notebook_selected_index = self.get_notebook_index_for_id(notebook_id);
                     CreateForm::Note(NoteForm {
                         current_field: NoteField::Title,
                         title: Editor::from_string(note.title.clone()),
                         tags: Editor::from_string(note.tags.clone().unwrap_or_default()),
                         content: Editor::from_string(note.content.clone().unwrap_or_default()),
+                        notebook_id,
+                        notebook_selected_index,
                         editing_item_id: note.id,
                     })
                 }
                 SelectedItem::Journal(journal) => {
+                    let notebook_id = journal.notebook_id;
+                    let notebook_selected_index = self.get_notebook_index_for_id(notebook_id);
                     CreateForm::Journal(JournalForm {
                         current_field: JournalField::Date,
                         date: Editor::from_string(journal.date.clone()),
                         title: Editor::from_string(journal.title.clone().unwrap_or_default()),
                         content: Editor::from_string(journal.content.clone().unwrap_or_default()),
                         tags: Editor::from_string(journal.tags.clone().unwrap_or_default()),
+                        notebook_id,
+                        notebook_selected_index,
                         editing_item_id: journal.id,
                     })
                 }
@@ -1303,6 +1324,8 @@ impl App {
 
 
     pub fn enter_create_mode(&mut self) {
+        let notebook_id = self.current_notebook_id;
+        let notebook_selected_index = self.get_notebook_index_for_id(notebook_id);
         let form = match self.current_tab {
             Tab::Tasks => {
                 CreateForm::Task(TaskForm {
@@ -1311,6 +1334,8 @@ impl App {
                     description: Editor::new(),
                     due_date: Editor::new(),
                     tags: Editor::new(),
+                    notebook_id,
+                    notebook_selected_index,
                     editing_item_id: None,
                 })
             }
@@ -1320,6 +1345,8 @@ impl App {
                     title: Editor::new(),
                     tags: Editor::new(),
                     content: Editor::new(),
+                    notebook_id,
+                    notebook_selected_index,
                     editing_item_id: None,
                 })
             }
@@ -1332,12 +1359,27 @@ impl App {
                     title: Editor::new(),
                     content: Editor::new(),
                     tags: Editor::new(),
+                    notebook_id,
+                    notebook_selected_index,
                     editing_item_id: None,
                 })
             }
         };
         self.create_form = Some(form);
         self.mode = Mode::Create;
+    }
+
+    /// Get notebook index for a given notebook_id (0 = "[None]", 1+ = actual notebooks)
+    fn get_notebook_index_for_id(&self, notebook_id: Option<i64>) -> usize {
+        if let Some(nb_id) = notebook_id {
+            self.notebooks
+                .iter()
+                .position(|n| n.id == Some(nb_id))
+                .map(|idx| idx + 1) // +1 because "[None]" is at index 0
+                .unwrap_or(0)
+        } else {
+            0 // "[None]" is selected
+        }
     }
 
     pub fn exit_create_mode(&mut self) {
@@ -1354,22 +1396,26 @@ impl App {
                         (TaskField::Title, true) => TaskField::Description,
                         (TaskField::Description, true) => TaskField::DueDate,
                         (TaskField::DueDate, true) => TaskField::Tags,
-                        (TaskField::Tags, true) => TaskField::Title, // Wrap around
-                        (TaskField::Title, false) => TaskField::Tags, // Wrap around
+                        (TaskField::Tags, true) => TaskField::Notebook,
+                        (TaskField::Notebook, true) => TaskField::Title, // Wrap around
+                        (TaskField::Title, false) => TaskField::Notebook, // Wrap around
                         (TaskField::Description, false) => TaskField::Title,
                         (TaskField::DueDate, false) => TaskField::Description,
                         (TaskField::Tags, false) => TaskField::DueDate,
+                        (TaskField::Notebook, false) => TaskField::Tags,
                     };
                 }
                 CreateForm::Note(note_form) => {
                     let current = note_form.current_field;
                     note_form.current_field = match (current, forward) {
                         (NoteField::Title, true) => NoteField::Tags,
-                        (NoteField::Tags, true) => NoteField::Content,
+                        (NoteField::Tags, true) => NoteField::Notebook,
+                        (NoteField::Notebook, true) => NoteField::Content,
                         (NoteField::Content, true) => NoteField::Title, // Wrap around
                         (NoteField::Title, false) => NoteField::Content, // Wrap around
                         (NoteField::Tags, false) => NoteField::Title,
-                        (NoteField::Content, false) => NoteField::Tags,
+                        (NoteField::Notebook, false) => NoteField::Tags,
+                        (NoteField::Content, false) => NoteField::Notebook,
                     };
                 }
                 CreateForm::Journal(journal_form) => {
@@ -1377,12 +1423,14 @@ impl App {
                     journal_form.current_field = match (current, forward) {
                         (JournalField::Date, true) => JournalField::Title,
                         (JournalField::Title, true) => JournalField::Tags,
-                        (JournalField::Tags, true) => JournalField::Content,
+                        (JournalField::Tags, true) => JournalField::Notebook,
+                        (JournalField::Notebook, true) => JournalField::Content,
                         (JournalField::Content, true) => JournalField::Date, // Wrap around
                         (JournalField::Date, false) => JournalField::Content, // Wrap around
                         (JournalField::Title, false) => JournalField::Date,
                         (JournalField::Tags, false) => JournalField::Title,
-                        (JournalField::Content, false) => JournalField::Tags,
+                        (JournalField::Notebook, false) => JournalField::Tags,
+                        (JournalField::Content, false) => JournalField::Notebook,
                     };
                 }
             }
@@ -1398,12 +1446,14 @@ impl App {
                         TaskField::Description => Some(&mut task_form.description),
                         TaskField::DueDate => Some(&mut task_form.due_date),
                         TaskField::Tags => Some(&mut task_form.tags),
+                        TaskField::Notebook => None, // Notebook field doesn't use Editor
                     }
                 }
                 CreateForm::Note(note_form) => {
                     match note_form.current_field {
                         NoteField::Title => Some(&mut note_form.title),
                         NoteField::Tags => Some(&mut note_form.tags),
+                        NoteField::Notebook => None, // Notebook field doesn't use Editor
                         NoteField::Content => Some(&mut note_form.content),
                     }
                 }
@@ -1412,6 +1462,7 @@ impl App {
                         JournalField::Date => Some(&mut journal_form.date),
                         JournalField::Title => Some(&mut journal_form.title),
                         JournalField::Tags => Some(&mut journal_form.tags),
+                        JournalField::Notebook => None, // Notebook field doesn't use Editor
                         JournalField::Content => Some(&mut journal_form.content),
                     }
                 }
@@ -1427,6 +1478,18 @@ impl App {
                 CreateForm::Note(note_form) => note_form.current_field == NoteField::Content,
                 CreateForm::Journal(journal_form) => journal_form.current_field == JournalField::Content,
                 CreateForm::Task(task_form) => task_form.current_field == TaskField::Description,
+            }
+        } else {
+            false
+        }
+    }
+
+    pub fn is_notebook_field_active(&self) -> bool {
+        if let Some(ref form) = self.create_form {
+            match form {
+                CreateForm::Task(task_form) => task_form.current_field == TaskField::Notebook,
+                CreateForm::Note(note_form) => note_form.current_field == NoteField::Notebook,
+                CreateForm::Journal(journal_form) => journal_form.current_field == JournalField::Notebook,
             }
         } else {
             false
@@ -1492,6 +1555,7 @@ impl App {
                             task.description = if description.is_empty() { None } else { Some(description) };
                             task.due_date = if due_date.is_empty() { None } else { Some(due_date) };
                             task.tags = if tags.is_empty() { None } else { Some(tags) };
+                            task.notebook_id = task_form.notebook_id;
                             task.updated_at = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
                             
                             // Update with error handling
@@ -1520,6 +1584,7 @@ impl App {
                         task.description = if description.is_empty() { None } else { Some(description) };
                         task.due_date = if due_date.is_empty() { None } else { Some(due_date) };
                         task.tags = if tags.is_empty() { None } else { Some(tags) };
+                        task.notebook_id = task_form.notebook_id;
                         
                         // Assign order value (max + 1)
                         let max_order = self.database.get_max_task_order()
@@ -1575,6 +1640,7 @@ impl App {
                             note.title = title;
                             note.content = if content.is_empty() { None } else { Some(content) };
                             note.tags = if tags.is_empty() { None } else { Some(tags) };
+                            note.notebook_id = note_form.notebook_id;
                             note.updated_at = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
                             
                             // Update with error handling
@@ -1602,6 +1668,7 @@ impl App {
                         let mut note = Note::new(title);
                         note.content = if content.is_empty() { None } else { Some(content) };
                         note.tags = if tags.is_empty() { None } else { Some(tags) };
+                        note.notebook_id = note_form.notebook_id;
 
                         // Insert into database with error handling
                         if let Err(e) = self.database.insert_note(&note) {
@@ -1638,6 +1705,7 @@ impl App {
                             journal.title = if title.is_empty() { None } else { Some(title) };
                             journal.content = if content.is_empty() { None } else { Some(content) };
                             journal.tags = if tags.is_empty() { None } else { Some(tags) };
+                            journal.notebook_id = journal_form.notebook_id;
                             journal.updated_at = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
                             
                             // Update with error handling
@@ -1666,6 +1734,7 @@ impl App {
                         journal.title = if title.is_empty() { None } else { Some(title) };
                         journal.content = if content.is_empty() { None } else { Some(content) };
                         journal.tags = if tags.is_empty() { None } else { Some(tags) };
+                        journal.notebook_id = journal_form.notebook_id;
 
                         // Insert into database with error handling
                         if let Err(e) = self.database.insert_journal(&journal) {
@@ -2184,6 +2253,8 @@ impl App {
     /// Switch to a different notebook
     pub fn switch_notebook(&mut self, id: Option<i64>) -> Result<(), DatabaseError> {
         self.current_notebook_id = id;
+        // Reload data to filter by new notebook
+        self.load_data()?;
         self.set_status_message(format!("Switched to notebook: {}", self.get_notebook_display_name(id)));
         Ok(())
     }
@@ -2243,6 +2314,7 @@ impl App {
     }
 
     /// Delete a notebook
+    /// Items that belonged to this notebook will be moved to "[None]"
     pub fn delete_notebook(&mut self, id: i64) -> Result<(), DatabaseError> {
         // Check if this is the current notebook
         if self.current_notebook_id == Some(id) {
@@ -2258,7 +2330,10 @@ impl App {
         // Reload to ensure consistency
         self.notebooks = self.database.get_all_notebooks()?;
         
-        self.set_status_message("Notebook deleted".to_string());
+        // Reload data to show items that were moved to "[None]"
+        self.load_data()?;
+        
+        self.set_status_message("Notebook deleted (items moved to [None])".to_string());
         Ok(())
     }
 

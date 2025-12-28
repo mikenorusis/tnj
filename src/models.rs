@@ -10,6 +10,7 @@ pub struct Task {
     pub tags: Option<String>,
     pub order: i64,               // Order for sorting tasks
     pub archived: bool,
+    pub notebook_id: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -21,6 +22,7 @@ pub struct Note {
     pub content: Option<String>,
     pub tags: Option<String>,
     pub archived: bool,
+    pub notebook_id: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -33,6 +35,7 @@ pub struct JournalEntry {
     pub content: Option<String>,
     pub tags: Option<String>,
     pub archived: bool,
+    pub notebook_id: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -49,6 +52,7 @@ impl Task {
             tags: None,
             order: 0,
             archived: false,
+            notebook_id: None,
             created_at: now.clone(),
             updated_at: now,
         }
@@ -64,6 +68,7 @@ impl Note {
             content: None,
             tags: None,
             archived: false,
+            notebook_id: None,
             created_at: now.clone(),
             updated_at: now,
         }
@@ -80,6 +85,7 @@ impl JournalEntry {
             content: None,
             tags: None,
             archived: false,
+            notebook_id: None,
             created_at: now.clone(),
             updated_at: now,
         }
