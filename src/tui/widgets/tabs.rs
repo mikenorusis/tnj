@@ -73,7 +73,7 @@ pub fn render_tabs(f: &mut Frame, area: Rect, current_tab: Tab, config: &Config,
     
     // Render notebook selector on the right
     let notebook_name = app.get_notebook_display_name(app.notebooks.current_notebook_id);
-    let notebook_text = format!("Notebook: {} ▼", notebook_name);
+    let notebook_text = format!("▼ Notebook: {}", notebook_name);
     
     // Truncate if too long (using char count, not byte count, for safe UTF-8 handling)
     let max_chars = notebook_area.width.saturating_sub(2) as usize;

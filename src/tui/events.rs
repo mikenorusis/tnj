@@ -845,24 +845,29 @@ fn handle_notebook_modal_mode(app: &mut App, key_event: KeyEvent) -> Result<bool
     if let Some(ref mut state) = app.notebooks.modal_state {
         // Handle field navigation
         match key_event.code {
-            KeyCode::Tab => {
-                let forward = !key_event.modifiers.contains(KeyModifiers::SHIFT);
-                app.navigate_notebook_modal(forward);
-                return Ok(false);
-            }
-            KeyCode::BackTab => {
-                app.navigate_notebook_modal(false);
+            KeyCode::Tab | KeyCode::BackTab => {
+                app.navigate_notebook_modal();
                 return Ok(false);
             }
             KeyCode::Up => {
-                if matches!(state.current_field, crate::tui::app::NotebookModalField::NotebookList) {
-                    app.move_notebook_selection_up();
+                match state.current_field {
+                    crate::tui::app::NotebookModalField::NotebookList => {
+                        app.move_notebook_selection_up();
+                    }
+                    crate::tui::app::NotebookModalField::ActionsList => {
+                        app.move_actions_selection_up();
+                    }
                 }
                 return Ok(false);
             }
             KeyCode::Down => {
-                if matches!(state.current_field, crate::tui::app::NotebookModalField::NotebookList) {
-                    app.move_notebook_selection_down();
+                match state.current_field {
+                    crate::tui::app::NotebookModalField::NotebookList => {
+                        app.move_notebook_selection_down();
+                    }
+                    crate::tui::app::NotebookModalField::ActionsList => {
+                        app.move_actions_selection_down();
+                    }
                 }
                 return Ok(false);
             }
@@ -920,64 +925,75 @@ fn handle_notebook_modal_mode(app: &mut App, key_event: KeyEvent) -> Result<bool
                 
                 // Otherwise, handle field actions
                 match state.current_field {
-                    crate::tui::app::NotebookModalField::Add => {
-                        state.mode = crate::tui::app::NotebookModalMode::Add;
-                        state.name_editor = Editor::new();
-                    }
-                    crate::tui::app::NotebookModalField::Rename => {
-                        if state.selected_index > 0 {
-                            // Can't rename "[None]"
-                            let notebook_id = app.notebooks.notebooks.get(state.selected_index - 1)
-                                .and_then(|n| n.id);
-                            if let Some(id) = notebook_id {
-                                state.mode = crate::tui::app::NotebookModalMode::Rename;
-                                state.name_editor = Editor::from_string(
-                                    app.notebooks.notebooks.iter()
-                                        .find(|n| n.id == Some(id))
-                                        .map(|n| n.name.clone())
-                                        .unwrap_or_default()
-                                );
+                    crate::tui::app::NotebookModalField::ActionsList => {
+                        // Handle action based on actions_selected_index
+                        // 0 = Add, 1 = Rename, 2 = Delete, 3 = Switch
+                        match state.actions_selected_index {
+                            0 => {
+                                // Add
+                                state.mode = crate::tui::app::NotebookModalMode::Add;
+                                state.name_editor = Editor::new();
                             }
-                        }
-                    }
-                    crate::tui::app::NotebookModalField::Delete => {
-                        if state.selected_index > 0 {
-                            // Can't delete "[None]"
-                            let notebook_id = app.notebooks.notebooks.get(state.selected_index - 1)
-                                .and_then(|n| n.id);
-                            if let Some(id) = notebook_id {
-                                let selected_idx = state.selected_index;
-                                
-                                // Release the borrow on state by ending the if let block
-                                
-                                if let Err(e) = app.delete_notebook(id) {
-                                    app.set_status_message(format!("Failed to delete notebook: {}", e));
-                                } else {
-                                    // Reload notebooks and reset selection
-                                    app.notebooks.notebooks = app.database.get_all_notebooks().unwrap_or_default();
-                                    if let Some(ref mut new_state) = app.notebooks.modal_state {
-                                        if selected_idx > app.notebooks.notebooks.len() {
-                                            new_state.selected_index = app.notebooks.notebooks.len();
-                                        }
-                                        new_state.list_state.select(Some(new_state.selected_index));
+                            1 => {
+                                // Rename
+                                if state.selected_index > 0 {
+                                    // Can't rename "[None]"
+                                    let notebook_id = app.notebooks.notebooks.get(state.selected_index - 1)
+                                        .and_then(|n| n.id);
+                                    if let Some(id) = notebook_id {
+                                        state.mode = crate::tui::app::NotebookModalMode::Rename;
+                                        state.name_editor = Editor::from_string(
+                                            app.notebooks.notebooks.iter()
+                                                .find(|n| n.id == Some(id))
+                                                .map(|n| n.name.clone())
+                                                .unwrap_or_default()
+                                        );
                                     }
                                 }
                             }
+                            2 => {
+                                // Delete
+                                if state.selected_index > 0 {
+                                    // Can't delete "[None]"
+                                    let notebook_id = app.notebooks.notebooks.get(state.selected_index - 1)
+                                        .and_then(|n| n.id);
+                                    if let Some(id) = notebook_id {
+                                        let selected_idx = state.selected_index;
+                                        
+                                        // Release the borrow on state by ending the if let block
+                                        
+                                        if let Err(e) = app.delete_notebook(id) {
+                                            app.set_status_message(format!("Failed to delete notebook: {}", e));
+                                        } else {
+                                            // Reload notebooks and reset selection
+                                            app.notebooks.notebooks = app.database.get_all_notebooks().unwrap_or_default();
+                                            if let Some(ref mut new_state) = app.notebooks.modal_state {
+                                                if selected_idx > app.notebooks.notebooks.len() {
+                                                    new_state.selected_index = app.notebooks.notebooks.len();
+                                                }
+                                                new_state.list_state.select(Some(new_state.selected_index));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            3 => {
+                                // Switch
+                                let notebook_id = if state.selected_index == 0 {
+                                    None // "[None]"
+                                } else {
+                                    app.notebooks.notebooks.get(state.selected_index - 1)
+                                        .and_then(|n| n.id)
+                                };
+                                if let Err(e) = app.switch_notebook(notebook_id) {
+                                    app.set_status_message(format!("Failed to switch notebook: {}", e));
+                                } else {
+                                    app.exit_notebook_modal_mode();
+                                }
+                                return Ok(false);
+                            }
+                            _ => {}
                         }
-                    }
-                    crate::tui::app::NotebookModalField::Switch => {
-                        let notebook_id = if state.selected_index == 0 {
-                            None // "[None]"
-                        } else {
-                            app.notebooks.notebooks.get(state.selected_index - 1)
-                                .and_then(|n| n.id)
-                        };
-                        if let Err(e) = app.switch_notebook(notebook_id) {
-                            app.set_status_message(format!("Failed to switch notebook: {}", e));
-                        } else {
-                            app.exit_notebook_modal_mode();
-                        }
-                        return Ok(false);
                     }
                     crate::tui::app::NotebookModalField::NotebookList => {
                         // Switch to the selected notebook

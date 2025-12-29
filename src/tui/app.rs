@@ -76,16 +76,14 @@ pub enum NotebookModalMode {
 #[derive(Debug, Clone)]
 pub enum NotebookModalField {
     NotebookList,
-    Add,
-    Rename,
-    Delete,
-    Switch,
+    ActionsList,
 }
 
 #[derive(Debug, Clone)]
 pub struct NotebookModalState {
     pub mode: NotebookModalMode,
     pub selected_index: usize, // 0 = "[None]", 1+ = actual notebooks
+    pub actions_selected_index: usize, // 0 = Add, 1 = Rename, 2 = Delete, 3 = Switch
     pub name_editor: Editor,
     pub list_state: ListState,
     pub current_field: NotebookModalField,
@@ -2385,6 +2383,7 @@ impl App {
         self.notebooks.modal_state = Some(NotebookModalState {
             mode: NotebookModalMode::View,
             selected_index,
+            actions_selected_index: 0,
             name_editor: Editor::new(),
             list_state: ListState::default(),
             current_field: NotebookModalField::NotebookList,
@@ -2487,27 +2486,13 @@ impl App {
     }
 
     /// Navigate notebook modal fields
-    pub fn navigate_notebook_modal(&mut self, forward: bool) {
+    pub fn navigate_notebook_modal(&mut self) {
         if let Some(ref mut state) = self.notebooks.modal_state {
-            let fields = vec![
-                NotebookModalField::NotebookList,
-                NotebookModalField::Add,
-                NotebookModalField::Rename,
-                NotebookModalField::Delete,
-                NotebookModalField::Switch,
-            ];
-            
-            let current_idx = fields.iter()
-                .position(|f| std::mem::discriminant(f) == std::mem::discriminant(&state.current_field))
-                .unwrap_or(0);
-            
-            let new_idx = if forward {
-                (current_idx + 1) % fields.len()
-            } else {
-                (current_idx + fields.len() - 1) % fields.len()
+            // Tab only switches between NotebookList and ActionsList
+            state.current_field = match state.current_field {
+                NotebookModalField::NotebookList => NotebookModalField::ActionsList,
+                NotebookModalField::ActionsList => NotebookModalField::NotebookList,
             };
-            
-            state.current_field = fields[new_idx].clone();
         }
     }
 
@@ -2530,6 +2515,26 @@ impl App {
             if state.selected_index <= max_index {
                 state.selected_index = (state.selected_index + 1).min(max_index);
                 state.list_state.select(Some(state.selected_index));
+            }
+        }
+    }
+
+    /// Move actions selection up
+    pub fn move_actions_selection_up(&mut self) {
+        if let Some(ref mut state) = self.notebooks.modal_state {
+            if state.actions_selected_index > 0 {
+                state.actions_selected_index -= 1;
+            }
+        }
+    }
+
+    /// Move actions selection down
+    pub fn move_actions_selection_down(&mut self) {
+        if let Some(ref mut state) = self.notebooks.modal_state {
+            // Actions: Add (0), Rename (1), Delete (2), Switch (3)
+            let max_index = 3;
+            if state.actions_selected_index < max_index {
+                state.actions_selected_index += 1;
             }
         }
     }
