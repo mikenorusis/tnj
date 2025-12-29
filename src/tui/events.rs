@@ -186,574 +186,266 @@ pub fn run_event_loop(mut app: App) -> Result<(), TuiError> {
     Ok(())
 }
 
-fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError> {
-    // Handle delete confirmation modal first (before other modes)
-    if app.modals.delete_confirmation.is_some() {
-        match key_event.code {
-            KeyCode::Up => {
-                // Move selection up (wrapping from Archive to Cancel)
-                if app.modals.delete_modal_selection == 0 {
-                    app.modals.delete_modal_selection = 2; // Wrap to Cancel
-                } else {
-                    app.modals.delete_modal_selection -= 1;
-                }
+fn handle_delete_confirmation_modal(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError> {
+    match key_event.code {
+        KeyCode::Up => {
+            // Move selection up (wrapping from Archive to Cancel)
+            if app.modals.delete_modal_selection == 0 {
+                app.modals.delete_modal_selection = 2; // Wrap to Cancel
+            } else {
+                app.modals.delete_modal_selection -= 1;
+            }
+            return Ok(false);
+        }
+        KeyCode::Down => {
+            // Move selection down (wrapping from Cancel to Archive)
+            if app.modals.delete_modal_selection == 2 {
+                app.modals.delete_modal_selection = 0; // Wrap to Archive
+            } else {
+                app.modals.delete_modal_selection += 1;
+            }
+            return Ok(false);
+        }
+        KeyCode::Enter => {
+            // Execute selected action
+            if app.modals.delete_modal_selection == 2 {
+                // Cancel - just close modal
+                app.modals.delete_confirmation = None;
                 return Ok(false);
             }
-            KeyCode::Down => {
-                // Move selection down (wrapping from Cancel to Archive)
-                if app.modals.delete_modal_selection == 2 {
-                    app.modals.delete_modal_selection = 0; // Wrap to Archive
-                } else {
-                    app.modals.delete_modal_selection += 1;
-                }
-                return Ok(false);
-            }
-            KeyCode::Enter => {
-                // Execute selected action
-                if app.modals.delete_modal_selection == 2 {
-                    // Cancel - just close modal
-                    app.modals.delete_confirmation = None;
-                    return Ok(false);
-                }
-                
-                if let Some(ref item) = app.modals.delete_confirmation {
-                    match item {
-                        crate::tui::app::SelectedItem::Task(task) => {
-                            if let Some(id) = task.id {
-                                if app.modals.delete_modal_selection == 0 {
-                                    // Archive
-                                    if let Err(e) = app.database.archive_task(id) {
-                                        app.set_status_message(format!("Failed to archive task: {}", e));
+            
+            if let Some(ref item) = app.modals.delete_confirmation {
+                match item {
+                    crate::tui::app::SelectedItem::Task(task) => {
+                        if let Some(id) = task.id {
+                            if app.modals.delete_modal_selection == 0 {
+                                // Archive
+                                if let Err(e) = app.database.archive_task(id) {
+                                    app.set_status_message(format!("Failed to archive task: {}", e));
+                                } else {
+                                    if let Err(e) = app.load_data() {
+                                        app.set_status_message(format!("Failed to reload data: {}", e));
                                     } else {
-                                        if let Err(e) = app.load_data() {
-                                            app.set_status_message(format!("Failed to reload data: {}", e));
-                                        } else {
-                                            app.adjust_selected_index();
-                                            app.select_current_item();
-                                            app.set_status_message("Task archived".to_string());
-                                        }
-                                    }
-                                } else if app.modals.delete_modal_selection == 1 {
-                                    // Delete
-                                    if let Err(e) = app.database.delete_task(id) {
-                                        app.set_status_message(format!("Failed to delete task: {}", e));
-                                    } else {
-                                        if let Err(e) = app.load_data() {
-                                            app.set_status_message(format!("Failed to reload data: {}", e));
-                                        } else {
-                                            app.adjust_selected_index();
-                                            app.select_current_item();
-                                            app.set_status_message("Task deleted".to_string());
-                                        }
+                                        app.adjust_selected_index();
+                                        app.select_current_item();
+                                        app.set_status_message("Task archived".to_string());
                                     }
                                 }
-                            } else {
-                                app.set_status_message("Task has no ID".to_string());
+                            } else if app.modals.delete_modal_selection == 1 {
+                                // Delete
+                                if let Err(e) = app.database.delete_task(id) {
+                                    app.set_status_message(format!("Failed to delete task: {}", e));
+                                } else {
+                                    if let Err(e) = app.load_data() {
+                                        app.set_status_message(format!("Failed to reload data: {}", e));
+                                    } else {
+                                        app.adjust_selected_index();
+                                        app.select_current_item();
+                                        app.set_status_message("Task deleted".to_string());
+                                    }
+                                }
                             }
+                        } else {
+                            app.set_status_message("Task has no ID".to_string());
                         }
-                        crate::tui::app::SelectedItem::Note(note) => {
-                            if let Some(id) = note.id {
-                                if app.modals.delete_modal_selection == 0 {
-                                    // Archive
-                                    if let Err(e) = app.database.archive_note(id) {
-                                        app.set_status_message(format!("Failed to archive note: {}", e));
+                    }
+                    crate::tui::app::SelectedItem::Note(note) => {
+                        if let Some(id) = note.id {
+                            if app.modals.delete_modal_selection == 0 {
+                                // Archive
+                                if let Err(e) = app.database.archive_note(id) {
+                                    app.set_status_message(format!("Failed to archive note: {}", e));
+                                } else {
+                                    if let Err(e) = app.load_data() {
+                                        app.set_status_message(format!("Failed to reload data: {}", e));
                                     } else {
-                                        if let Err(e) = app.load_data() {
-                                            app.set_status_message(format!("Failed to reload data: {}", e));
-                                        } else {
-                                            app.adjust_selected_index();
-                                            app.select_current_item();
-                                            app.set_status_message("Note archived".to_string());
-                                        }
-                                    }
-                                } else if app.modals.delete_modal_selection == 1 {
-                                    // Delete
-                                    if let Err(e) = app.database.delete_note(id) {
-                                        app.set_status_message(format!("Failed to delete note: {}", e));
-                                    } else {
-                                        if let Err(e) = app.load_data() {
-                                            app.set_status_message(format!("Failed to reload data: {}", e));
-                                        } else {
-                                            app.adjust_selected_index();
-                                            app.select_current_item();
-                                            app.set_status_message("Note deleted".to_string());
-                                        }
+                                        app.adjust_selected_index();
+                                        app.select_current_item();
+                                        app.set_status_message("Note archived".to_string());
                                     }
                                 }
-                            } else {
-                                app.set_status_message("Note has no ID".to_string());
+                            } else if app.modals.delete_modal_selection == 1 {
+                                // Delete
+                                if let Err(e) = app.database.delete_note(id) {
+                                    app.set_status_message(format!("Failed to delete note: {}", e));
+                                } else {
+                                    if let Err(e) = app.load_data() {
+                                        app.set_status_message(format!("Failed to reload data: {}", e));
+                                    } else {
+                                        app.adjust_selected_index();
+                                        app.select_current_item();
+                                        app.set_status_message("Note deleted".to_string());
+                                    }
+                                }
                             }
+                        } else {
+                            app.set_status_message("Note has no ID".to_string());
                         }
-                        crate::tui::app::SelectedItem::Journal(journal) => {
-                            if let Some(id) = journal.id {
-                                if app.modals.delete_modal_selection == 0 {
-                                    // Archive
-                                    if let Err(e) = app.database.archive_journal(id) {
-                                        app.set_status_message(format!("Failed to archive journal entry: {}", e));
+                    }
+                    crate::tui::app::SelectedItem::Journal(journal) => {
+                        if let Some(id) = journal.id {
+                            if app.modals.delete_modal_selection == 0 {
+                                // Archive
+                                if let Err(e) = app.database.archive_journal(id) {
+                                    app.set_status_message(format!("Failed to archive journal entry: {}", e));
+                                } else {
+                                    if let Err(e) = app.load_data() {
+                                        app.set_status_message(format!("Failed to reload data: {}", e));
                                     } else {
-                                        if let Err(e) = app.load_data() {
-                                            app.set_status_message(format!("Failed to reload data: {}", e));
-                                        } else {
-                                            app.adjust_selected_index();
-                                            app.select_current_item();
-                                            app.set_status_message("Journal archived".to_string());
-                                        }
-                                    }
-                                } else if app.modals.delete_modal_selection == 1 {
-                                    // Delete
-                                    if let Err(e) = app.database.delete_journal(id) {
-                                        app.set_status_message(format!("Failed to delete journal entry: {}", e));
-                                    } else {
-                                        if let Err(e) = app.load_data() {
-                                            app.set_status_message(format!("Failed to reload data: {}", e));
-                                        } else {
-                                            app.adjust_selected_index();
-                                            app.select_current_item();
-                                            app.set_status_message("Journal deleted".to_string());
-                                        }
+                                        app.adjust_selected_index();
+                                        app.select_current_item();
+                                        app.set_status_message("Journal archived".to_string());
                                     }
                                 }
-                            } else {
-                                app.set_status_message("Journal entry has no ID".to_string());
+                            } else if app.modals.delete_modal_selection == 1 {
+                                // Delete
+                                if let Err(e) = app.database.delete_journal(id) {
+                                    app.set_status_message(format!("Failed to delete journal entry: {}", e));
+                                } else {
+                                    if let Err(e) = app.load_data() {
+                                        app.set_status_message(format!("Failed to reload data: {}", e));
+                                    } else {
+                                        app.adjust_selected_index();
+                                        app.select_current_item();
+                                        app.set_status_message("Journal deleted".to_string());
+                                    }
+                                }
                             }
+                        } else {
+                            app.set_status_message("Journal entry has no ID".to_string());
                         }
                     }
                 }
-                app.modals.delete_confirmation = None;
-                return Ok(false);
             }
-            KeyCode::Esc => {
-                // Cancel deletion
-                app.modals.delete_confirmation = None;
-                return Ok(false);
-            }
-            _ => {
-                // Ignore all other keys when confirmation modal is shown
-                return Ok(false);
-            }
+            app.modals.delete_confirmation = None;
+            return Ok(false);
         }
+        KeyCode::Esc => {
+            // Cancel deletion
+            app.modals.delete_confirmation = None;
+            return Ok(false);
+        }
+        _ => {
+            // Ignore all other keys when confirmation modal is shown
+            return Ok(false);
+        }
+    }
+}
+
+fn handle_markdown_help_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError> {
+    match key_event.code {
+        KeyCode::Esc => {
+            app.exit_markdown_help_mode();
+            return Ok(false);
+        }
+        KeyCode::Up => {
+            app.scroll_markdown_help_example_up();
+            app.scroll_markdown_help_rendered_up();
+            return Ok(false);
+        }
+        KeyCode::Down => {
+            app.scroll_markdown_help_example_down();
+            app.scroll_markdown_help_rendered_down();
+            return Ok(false);
+        }
+        KeyCode::PageUp => {
+            if let Ok((_, height)) = terminal_size() {
+                // Calculate viewport height for markdown help (85% of screen height, minus borders)
+                let popup_height = (height as f32 * 0.85) as u16;
+                let inner_height = popup_height.saturating_sub(2); // Outer block borders
+                let panel_height = inner_height.saturating_sub(2); // Panel borders
+                let viewport_height = panel_height as usize;
+                
+                // Get example text to calculate total lines
+                use crate::tui::widgets::markdown_help::get_example_markdown;
+                let example_text = get_example_markdown();
+                let _example_total_lines = example_text.lines().count();
+                
+                // Scroll both panels together
+                app.scroll_markdown_help_example_page_up(viewport_height);
+                app.scroll_markdown_help_rendered_page_up(viewport_height);
+            }
+            return Ok(false);
+        }
+        KeyCode::PageDown => {
+            if let Ok((_, height)) = terminal_size() {
+                // Calculate viewport height for markdown help
+                let popup_height = (height as f32 * 0.85) as u16;
+                let inner_height = popup_height.saturating_sub(2);
+                let panel_height = inner_height.saturating_sub(2);
+                let viewport_height = panel_height as usize;
+                
+                // Get example text to calculate total lines
+                use crate::tui::widgets::markdown_help::get_example_markdown;
+                let example_text = get_example_markdown();
+                let example_total_lines = example_text.lines().count();
+                
+                // Use example lines as approximation for rendered lines
+                app.scroll_markdown_help_example_page_down(viewport_height, example_total_lines);
+                app.scroll_markdown_help_rendered_page_down(viewport_height, example_total_lines);
+            }
+            return Ok(false);
+        }
+        KeyCode::Home => {
+            app.ui.markdown_help_example_scroll = 0;
+            app.ui.markdown_help_rendered_scroll = 0;
+            return Ok(false);
+        }
+        KeyCode::End => {
+            if let Ok((_, height)) = terminal_size() {
+                let popup_height = (height as f32 * 0.85) as u16;
+                let inner_height = popup_height.saturating_sub(2);
+                let panel_height = inner_height.saturating_sub(2);
+                let viewport_height = panel_height as usize;
+                
+                use crate::tui::widgets::markdown_help::get_example_markdown;
+                let example_text = get_example_markdown();
+                let example_total_lines = example_text.lines().count();
+                
+                // Use example lines as approximation for rendered lines
+                app.ui.markdown_help_example_scroll = example_total_lines.saturating_sub(viewport_height);
+                app.ui.markdown_help_rendered_scroll = example_total_lines.saturating_sub(viewport_height);
+            }
+            return Ok(false);
+        }
+        _ => {
+            // Check if help binding is pressed again to toggle off
+            let help_binding = parse_key_binding(&app.config.key_bindings.help)
+                .map_err(|e| TuiError::KeyBindingError(e))?;
+            if matches_key_event(key_event, &help_binding) {
+                app.exit_markdown_help_mode();
+                return Ok(false);
+            }
+            // Ignore all other keys in markdown help mode
+            return Ok(false);
+        }
+    }
+}
+
+fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError> {
+    // Handle delete confirmation modal first (before other modes)
+    if app.modals.delete_confirmation.is_some() {
+        return handle_delete_confirmation_modal(app, key_event);
     }
 
     // Handle markdown help mode first (before create mode)
     if app.ui.mode == crate::tui::app::Mode::MarkdownHelp {
-        match key_event.code {
-            KeyCode::Esc => {
-                app.exit_markdown_help_mode();
-                return Ok(false);
-            }
-            KeyCode::Up => {
-                app.scroll_markdown_help_example_up();
-                app.scroll_markdown_help_rendered_up();
-                return Ok(false);
-            }
-            KeyCode::Down => {
-                app.scroll_markdown_help_example_down();
-                app.scroll_markdown_help_rendered_down();
-                return Ok(false);
-            }
-            KeyCode::PageUp => {
-                if let Ok((_, height)) = terminal_size() {
-                    // Calculate viewport height for markdown help (85% of screen height, minus borders)
-                    let popup_height = (height as f32 * 0.85) as u16;
-                    let inner_height = popup_height.saturating_sub(2); // Outer block borders
-                    let panel_height = inner_height.saturating_sub(2); // Panel borders
-                    let viewport_height = panel_height as usize;
-                    
-                    // Get example text to calculate total lines
-                    use crate::tui::widgets::markdown_help::get_example_markdown;
-                    let example_text = get_example_markdown();
-                    let _example_total_lines = example_text.lines().count();
-                    
-                    // Scroll both panels together
-                    app.scroll_markdown_help_example_page_up(viewport_height);
-                    app.scroll_markdown_help_rendered_page_up(viewport_height);
-                }
-                return Ok(false);
-            }
-            KeyCode::PageDown => {
-                if let Ok((_, height)) = terminal_size() {
-                    // Calculate viewport height for markdown help
-                    let popup_height = (height as f32 * 0.85) as u16;
-                    let inner_height = popup_height.saturating_sub(2);
-                    let panel_height = inner_height.saturating_sub(2);
-                    let viewport_height = panel_height as usize;
-                    
-                    // Get example text to calculate total lines
-                    use crate::tui::widgets::markdown_help::get_example_markdown;
-                    let example_text = get_example_markdown();
-                    let example_total_lines = example_text.lines().count();
-                    
-                    // Use example lines as approximation for rendered lines
-                    app.scroll_markdown_help_example_page_down(viewport_height, example_total_lines);
-                    app.scroll_markdown_help_rendered_page_down(viewport_height, example_total_lines);
-                }
-                return Ok(false);
-            }
-            KeyCode::Home => {
-                app.ui.markdown_help_example_scroll = 0;
-                app.ui.markdown_help_rendered_scroll = 0;
-                return Ok(false);
-            }
-            KeyCode::End => {
-                if let Ok((_, height)) = terminal_size() {
-                    let popup_height = (height as f32 * 0.85) as u16;
-                    let inner_height = popup_height.saturating_sub(2);
-                    let panel_height = inner_height.saturating_sub(2);
-                    let viewport_height = panel_height as usize;
-                    
-                    use crate::tui::widgets::markdown_help::get_example_markdown;
-                    let example_text = get_example_markdown();
-                    let example_total_lines = example_text.lines().count();
-                    
-                    // Use example lines as approximation for rendered lines
-                    app.ui.markdown_help_example_scroll = example_total_lines.saturating_sub(viewport_height);
-                    app.ui.markdown_help_rendered_scroll = example_total_lines.saturating_sub(viewport_height);
-                }
-                return Ok(false);
-            }
-            _ => {
-                // Check if help binding is pressed again to toggle off
-                let help_binding = parse_key_binding(&app.config.key_bindings.help)
-                    .map_err(|e| TuiError::KeyBindingError(e))?;
-                if matches_key_event(key_event, &help_binding) {
-                    app.exit_markdown_help_mode();
-                    return Ok(false);
-                }
-                // Ignore all other keys in markdown help mode
-                return Ok(false);
-            }
-        }
+        return handle_markdown_help_mode(app, key_event);
     }
 
     // Handle create mode (before edit mode)
     // When in create mode, handle form navigation and editor input
     if app.ui.mode == crate::tui::app::Mode::Create {
-        // Check for save binding (Ctrl+s or Alt+s on macOS)
-        let save_binding = parse_key_binding(&app.config.key_bindings.save)
-            .map_err(|e| TuiError::KeyBindingError(e))?;
-        let mut is_save = matches_key_event(key_event, &save_binding);
-        
-        // On macOS, Option+s may produce a special character (like 'ś') without ALT modifier
-        // Check for this case before the character gets inserted into the editor
-        #[cfg(target_os = "macos")]
-        {
-            if !is_save {
-                is_save = match key_event.code {
-                    KeyCode::Char(c) => {
-                        // Option+s on macOS typically produces 'ś' (U+015B)
-                        // Also check for other possible Option+s results depending on keyboard layout
-                        c == 'ś' || c == 'Ś' || c == 'ß' || c == '§'
-                    }
-                    _ => false,
-                };
-            }
-        }
-        
-        if is_save {
-            // Save with error handling - most errors are already shown via status messages
-            // But if there's an unexpected error, show it
-            match app.save_create_form() {
-                Ok(()) => {
-                    // Success - status message already set in save_create_form
-                }
-                Err(e) => {
-                    // This should rarely happen since save_create_form handles most errors internally
-                    app.set_status_message(format!("Unexpected error while saving: {}", e));
-                }
-            }
-            return Ok(false);
-        }
-
-        // Check for notebook field navigation (up/down arrows)
-        // Tab/Shift+Tab should still work to navigate away from notebook field
-        if app.is_notebook_field_active() {
-            match key_event.code {
-                KeyCode::Up => {
-                    if let Some(ref mut form) = app.form.create_form {
-                        match form {
-                            crate::tui::app::CreateForm::Task(task_form) => {
-                                if task_form.notebook_selected_index > 0 {
-                                    task_form.notebook_selected_index -= 1;
-                                    task_form.notebook_id = if task_form.notebook_selected_index == 0 {
-                                        None
-                                    } else {
-                                        app.notebooks.notebooks.get(task_form.notebook_selected_index - 1)
-                                            .and_then(|n| n.id)
-                                    };
-                                }
-                            }
-                            crate::tui::app::CreateForm::Note(note_form) => {
-                                if note_form.notebook_selected_index > 0 {
-                                    note_form.notebook_selected_index -= 1;
-                                    note_form.notebook_id = if note_form.notebook_selected_index == 0 {
-                                        None
-                                    } else {
-                                        app.notebooks.notebooks.get(note_form.notebook_selected_index - 1)
-                                            .and_then(|n| n.id)
-                                    };
-                                }
-                            }
-                            crate::tui::app::CreateForm::Journal(journal_form) => {
-                                if journal_form.notebook_selected_index > 0 {
-                                    journal_form.notebook_selected_index -= 1;
-                                    journal_form.notebook_id = if journal_form.notebook_selected_index == 0 {
-                                        None
-                                    } else {
-                                        app.notebooks.notebooks.get(journal_form.notebook_selected_index - 1)
-                                            .and_then(|n| n.id)
-                                    };
-                                }
-                            }
-                        }
-                    }
-                    return Ok(false);
-                }
-                KeyCode::Down => {
-                    if let Some(ref mut form) = app.form.create_form {
-                        // max_valid_index is app.notebooks.len() (the last valid index)
-                        // Index 0 = "[None]", indices 1..=len() = notebooks
-                        // So if we have 3 notebooks, valid indices are 0, 1, 2, 3
-                        // We use len() + 1 for the comparison to allow reaching index len()
-                        let max_valid_index = app.notebooks.notebooks.len();
-                        let max_index_for_check = app.notebooks.notebooks.len() + 1;
-                        match form {
-                            crate::tui::app::CreateForm::Task(task_form) => {
-                                if task_form.notebook_selected_index < max_index_for_check {
-                                    task_form.notebook_selected_index += 1;
-                                    // Clamp to maximum valid index to prevent going out of bounds
-                                    if task_form.notebook_selected_index > max_valid_index {
-                                        task_form.notebook_selected_index = max_valid_index;
-                                    }
-                                    task_form.notebook_id = if task_form.notebook_selected_index == 0 {
-                                        None
-                                    } else {
-                                        app.notebooks.notebooks.get(task_form.notebook_selected_index - 1)
-                                            .and_then(|n| n.id)
-                                    };
-                                }
-                            }
-                            crate::tui::app::CreateForm::Note(note_form) => {
-                                if note_form.notebook_selected_index < max_index_for_check {
-                                    note_form.notebook_selected_index += 1;
-                                    // Clamp to maximum valid index to prevent going out of bounds
-                                    if note_form.notebook_selected_index > max_valid_index {
-                                        note_form.notebook_selected_index = max_valid_index;
-                                    }
-                                    note_form.notebook_id = if note_form.notebook_selected_index == 0 {
-                                        None
-                                    } else {
-                                        app.notebooks.notebooks.get(note_form.notebook_selected_index - 1)
-                                            .and_then(|n| n.id)
-                                    };
-                                }
-                            }
-                            crate::tui::app::CreateForm::Journal(journal_form) => {
-                                if journal_form.notebook_selected_index < max_index_for_check {
-                                    journal_form.notebook_selected_index += 1;
-                                    // Clamp to maximum valid index to prevent going out of bounds
-                                    if journal_form.notebook_selected_index > max_valid_index {
-                                        journal_form.notebook_selected_index = max_valid_index;
-                                    }
-                                    journal_form.notebook_id = if journal_form.notebook_selected_index == 0 {
-                                        None
-                                    } else {
-                                        app.notebooks.notebooks.get(journal_form.notebook_selected_index - 1)
-                                            .and_then(|n| n.id)
-                                    };
-                                }
-                            }
-                        }
-                    }
-                    return Ok(false);
-                }
-                // Allow Tab/Shift+Tab to pass through for field navigation
-                KeyCode::Tab | KeyCode::BackTab => {
-                    // Let the Tab handling code below handle this
-                }
-                _ => {}
-            }
-        }
-
-        // Check for Tab/Shift+Tab/Enter for field navigation
-        // Enter behavior: insert newline if Content field is active, otherwise navigate to next field
-        match key_event.code {
-            KeyCode::BackTab => {
-                // Shift+Tab is sometimes sent as BackTab on some terminals
-                app.navigate_form_field(false);
-                return Ok(false);
-            }
-            KeyCode::Tab => {
-                let forward = !key_event.modifiers.contains(KeyModifiers::SHIFT);
-                app.navigate_form_field(forward);
-                return Ok(false);
-            }
-            KeyCode::Enter => {
-                // Check if we're in a Content field - if so, insert newline instead of navigating
-                if app.is_content_field_active() {
-                    // Content field is active - insert newline
-                    if let Some(ref mut editor) = app.get_current_form_editor() {
-                        editor.insert_newline();
-                    }
-                    return Ok(false);
-                } else {
-                    // Not in Content field - navigate to next field
-                    app.navigate_form_field(true);
-                    return Ok(false);
-                }
-            }
-            KeyCode::Esc => {
-                // Cancel creation
-                app.exit_create_mode();
-                return Ok(false);
-            }
-            _ => {
-                // Check for help binding before default handling
-                let help_binding = parse_key_binding(&app.config.key_bindings.help)
-                    .map_err(|e| TuiError::KeyBindingError(e))?;
-                if matches_key_event(key_event, &help_binding) {
-                    app.enter_markdown_help_mode();
-                    return Ok(false);
-                }
-            }
-        }
-
-        // Forward all other keys to the current form field's editor
-        // Extract config values before borrowing editor
-        let undo_binding = parse_key_binding(&app.config.key_bindings.undo)
-            .map_err(|e| TuiError::KeyBindingError(e))?;
-        let word_left_binding = parse_key_binding(&app.config.key_bindings.word_left)
-            .map_err(|e| TuiError::KeyBindingError(e))?;
-        let word_right_binding = parse_key_binding(&app.config.key_bindings.word_right)
-            .map_err(|e| TuiError::KeyBindingError(e))?;
-        
-        if let Some(ref mut editor) = app.get_current_form_editor() {
-            // Handle undo using config binding
-            if matches_key_event(key_event, &undo_binding) {
-                editor.undo();
-                return Ok(false);
-            }
-            
-            // Handle copy (Ctrl+C or Alt+C on macOS)
-            if crate::utils::has_primary_modifier(key_event.modifiers) && 
-               (key_event.code == KeyCode::Char('c') || key_event.code == KeyCode::Char('C')) {
-                let selected_text = editor.get_selected_text();
-                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                    if let Err(e) = clipboard.set_text(&selected_text) {
-                        app.set_status_message(format!("Failed to copy to clipboard: {}", e));
-                    } else if !selected_text.is_empty() {
-                        app.set_status_message("Copied to clipboard".to_string());
-                    }
-                } else {
-                    app.set_status_message("Failed to access clipboard".to_string());
-                }
-                return Ok(false);
-            }
-            
-            // Handle cut (Ctrl+X or Alt+X on macOS)
-            if crate::utils::has_primary_modifier(key_event.modifiers) && 
-               (key_event.code == KeyCode::Char('x') || key_event.code == KeyCode::Char('X')) {
-                let selected_text = editor.get_selected_text();
-                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                    if let Err(e) = clipboard.set_text(&selected_text) {
-                        app.set_status_message(format!("Failed to copy to clipboard: {}", e));
-                    } else {
-                        if !selected_text.is_empty() {
-                            editor.delete_selection();
-                            app.set_status_message("Cut to clipboard".to_string());
-                        }
-                    }
-                } else {
-                    app.set_status_message("Failed to access clipboard".to_string());
-                }
-                return Ok(false);
-            }
-            
-            // Handle select all (Ctrl+A or Alt+A on macOS)
-            if crate::utils::has_primary_modifier(key_event.modifiers) && 
-               (key_event.code == KeyCode::Char('a') || key_event.code == KeyCode::Char('A')) {
-                editor.select_all();
-                return Ok(false);
-            }
-            
-            // Handle word navigation using config bindings
-            
-            let extend_selection = key_event.modifiers.contains(KeyModifiers::SHIFT);
-            
-            match key_event.code {
-                KeyCode::Char(c) => {
-                    // Skip if primary modifier is held (to avoid inserting 'c' or 'x' when copy/cut is intended)
-                    if crate::utils::has_primary_modifier(key_event.modifiers) {
-                        return Ok(false);
-                    }
-                    editor.insert_char(c);
-                    return Ok(false);
-                }
-                KeyCode::Backspace => {
-                    editor.delete_char();
-                    return Ok(false);
-                }
-                KeyCode::Up => {
-                    editor.move_cursor_up(extend_selection);
-                    return Ok(false);
-                }
-                KeyCode::Down => {
-                    editor.move_cursor_down(extend_selection);
-                    return Ok(false);
-                }
-                KeyCode::Left => {
-                    if matches_key_event(key_event, &word_left_binding) {
-                        editor.move_cursor_word_left(extend_selection);
-                    } else {
-                        editor.move_cursor_left(extend_selection);
-                    }
-                    return Ok(false);
-                }
-                KeyCode::Right => {
-                    if matches_key_event(key_event, &word_right_binding) {
-                        editor.move_cursor_word_right(extend_selection);
-                    } else {
-                        editor.move_cursor_right(extend_selection);
-                    }
-                    return Ok(false);
-                }
-                KeyCode::Home => {
-                    editor.move_cursor_home(extend_selection);
-                    return Ok(false);
-                }
-                KeyCode::End => {
-                    editor.move_cursor_end(extend_selection);
-                    return Ok(false);
-                }
-                _ => {
-                    // Ignore other keys in create mode
-                    return Ok(false);
-                }
-            }
-        }
+        return handle_create_mode(app, key_event);
     }
 
     // Handle help mode
     if app.ui.mode == crate::tui::app::Mode::Help {
-        match key_event.code {
-            KeyCode::Esc => {
-                app.exit_help_mode();
-                return Ok(false);
-            }
-            _ => {
-                // Check if help binding is pressed again to toggle off
-                let help_binding = parse_key_binding(&app.config.key_bindings.help)
-                    .map_err(|e| TuiError::KeyBindingError(e))?;
-                if matches_key_event(key_event, &help_binding) {
-                    app.exit_help_mode();
-                    return Ok(false);
-                }
-                // Ignore all other keys in help mode
-                return Ok(false);
-            }
-        }
+        return handle_help_mode(app, key_event);
     }
 
     // Handle settings mode
+    // Only handle Esc and settings binding here; other keys fall through to global bindings
     if app.ui.mode == crate::tui::app::Mode::Settings {
         match key_event.code {
             KeyCode::Esc => {
@@ -769,95 +461,448 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                     return Ok(false);
                 }
                 // Allow arrow keys and select in settings mode
-                // These will be handled below
+                // These will be handled in handle_global_key_bindings
             }
         }
     }
 
     // Handle notebook modal mode
     if app.ui.mode == crate::tui::app::Mode::NotebookModal {
+        return handle_notebook_modal_mode(app, key_event);
+    }
+
+    // Handle search mode
+    if app.ui.mode == crate::tui::app::Mode::Search {
+        return handle_search_mode(app, key_event);
+    }
+
+    // Handle filter mode
+    if app.ui.mode == crate::tui::app::Mode::Filter {
+        return handle_filter_mode(app, key_event);
+    }
+
+fn handle_create_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError> {
+    // Check for save binding (Ctrl+s or Alt+s on macOS)
+    let save_binding = parse_key_binding(&app.config.key_bindings.save)
+        .map_err(|e| TuiError::KeyBindingError(e))?;
+    let mut is_save = matches_key_event(key_event, &save_binding);
+    
+    // On macOS, Option+s may produce a special character (like 'ś') without ALT modifier
+    // Check for this case before the character gets inserted into the editor
+    #[cfg(target_os = "macos")]
+    {
+        if !is_save {
+            is_save = match key_event.code {
+                KeyCode::Char(c) => {
+                    // Option+s on macOS typically produces 'ś' (U+015B)
+                    // Also check for other possible Option+s results depending on keyboard layout
+                    c == 'ś' || c == 'Ś' || c == 'ß' || c == '§'
+                }
+                _ => false,
+            };
+        }
+    }
+    
+    if is_save {
+        // Save with error handling - most errors are already shown via status messages
+        // But if there's an unexpected error, show it
+        match app.save_create_form() {
+            Ok(()) => {
+                // Success - status message already set in save_create_form
+            }
+            Err(e) => {
+                // This should rarely happen since save_create_form handles most errors internally
+                app.set_status_message(format!("Unexpected error while saving: {}", e));
+            }
+        }
+        return Ok(false);
+    }
+
+    // Check for notebook field navigation (up/down arrows)
+    // Tab/Shift+Tab should still work to navigate away from notebook field
+    if app.is_notebook_field_active() {
         match key_event.code {
-            KeyCode::Esc => {
-                app.exit_notebook_modal_mode();
+            KeyCode::Up => {
+                if let Some(ref mut form) = app.form.create_form {
+                    match form {
+                        crate::tui::app::CreateForm::Task(task_form) => {
+                            if task_form.notebook_selected_index > 0 {
+                                task_form.notebook_selected_index -= 1;
+                                task_form.notebook_id = if task_form.notebook_selected_index == 0 {
+                                    None
+                                } else {
+                                    app.notebooks.notebooks.get(task_form.notebook_selected_index - 1)
+                                        .and_then(|n| n.id)
+                                };
+                            }
+                        }
+                        crate::tui::app::CreateForm::Note(note_form) => {
+                            if note_form.notebook_selected_index > 0 {
+                                note_form.notebook_selected_index -= 1;
+                                note_form.notebook_id = if note_form.notebook_selected_index == 0 {
+                                    None
+                                } else {
+                                    app.notebooks.notebooks.get(note_form.notebook_selected_index - 1)
+                                        .and_then(|n| n.id)
+                                };
+                            }
+                        }
+                        crate::tui::app::CreateForm::Journal(journal_form) => {
+                            if journal_form.notebook_selected_index > 0 {
+                                journal_form.notebook_selected_index -= 1;
+                                journal_form.notebook_id = if journal_form.notebook_selected_index == 0 {
+                                    None
+                                } else {
+                                    app.notebooks.notebooks.get(journal_form.notebook_selected_index - 1)
+                                        .and_then(|n| n.id)
+                                };
+                            }
+                        }
+                    }
+                }
+                return Ok(false);
+            }
+            KeyCode::Down => {
+                if let Some(ref mut form) = app.form.create_form {
+                    // max_valid_index is app.notebooks.len() (the last valid index)
+                    // Index 0 = "[None]", indices 1..=len() = notebooks
+                    // So if we have 3 notebooks, valid indices are 0, 1, 2, 3
+                    // We use len() + 1 for the comparison to allow reaching index len()
+                    let max_valid_index = app.notebooks.notebooks.len();
+                    let max_index_for_check = app.notebooks.notebooks.len() + 1;
+                    match form {
+                        crate::tui::app::CreateForm::Task(task_form) => {
+                            if task_form.notebook_selected_index < max_index_for_check {
+                                task_form.notebook_selected_index += 1;
+                                // Clamp to maximum valid index to prevent going out of bounds
+                                if task_form.notebook_selected_index > max_valid_index {
+                                    task_form.notebook_selected_index = max_valid_index;
+                                }
+                                task_form.notebook_id = if task_form.notebook_selected_index == 0 {
+                                    None
+                                } else {
+                                    app.notebooks.notebooks.get(task_form.notebook_selected_index - 1)
+                                        .and_then(|n| n.id)
+                                };
+                            }
+                        }
+                        crate::tui::app::CreateForm::Note(note_form) => {
+                            if note_form.notebook_selected_index < max_index_for_check {
+                                note_form.notebook_selected_index += 1;
+                                // Clamp to maximum valid index to prevent going out of bounds
+                                if note_form.notebook_selected_index > max_valid_index {
+                                    note_form.notebook_selected_index = max_valid_index;
+                                }
+                                note_form.notebook_id = if note_form.notebook_selected_index == 0 {
+                                    None
+                                } else {
+                                    app.notebooks.notebooks.get(note_form.notebook_selected_index - 1)
+                                        .and_then(|n| n.id)
+                                };
+                            }
+                        }
+                        crate::tui::app::CreateForm::Journal(journal_form) => {
+                            if journal_form.notebook_selected_index < max_index_for_check {
+                                journal_form.notebook_selected_index += 1;
+                                // Clamp to maximum valid index to prevent going out of bounds
+                                if journal_form.notebook_selected_index > max_valid_index {
+                                    journal_form.notebook_selected_index = max_valid_index;
+                                }
+                                journal_form.notebook_id = if journal_form.notebook_selected_index == 0 {
+                                    None
+                                } else {
+                                    app.notebooks.notebooks.get(journal_form.notebook_selected_index - 1)
+                                        .and_then(|n| n.id)
+                                };
+                            }
+                        }
+                    }
+                }
+                return Ok(false);
+            }
+            // Allow Tab/Shift+Tab to pass through for field navigation
+            KeyCode::Tab | KeyCode::BackTab => {
+                // Let the Tab handling code below handle this
+            }
+            _ => {}
+        }
+    }
+
+    // Check for Tab/Shift+Tab/Enter for field navigation
+    // Enter behavior: insert newline if Content field is active, otherwise navigate to next field
+    match key_event.code {
+        KeyCode::BackTab => {
+            // Shift+Tab is sometimes sent as BackTab on some terminals
+            app.navigate_form_field(false);
+            return Ok(false);
+        }
+        KeyCode::Tab => {
+            let forward = !key_event.modifiers.contains(KeyModifiers::SHIFT);
+            app.navigate_form_field(forward);
+            return Ok(false);
+        }
+        KeyCode::Enter => {
+            // Check if we're in a Content field - if so, insert newline instead of navigating
+            if app.is_content_field_active() {
+                // Content field is active - insert newline
+                if let Some(ref mut editor) = app.get_current_form_editor() {
+                    editor.insert_newline();
+                }
+                return Ok(false);
+            } else {
+                // Not in Content field - navigate to next field
+                app.navigate_form_field(true);
+                return Ok(false);
+            }
+        }
+        KeyCode::Esc => {
+            // Cancel creation
+            app.exit_create_mode();
+            return Ok(false);
+        }
+        _ => {
+            // Check for help binding before default handling
+            let help_binding = parse_key_binding(&app.config.key_bindings.help)
+                .map_err(|e| TuiError::KeyBindingError(e))?;
+            if matches_key_event(key_event, &help_binding) {
+                app.enter_markdown_help_mode();
+                return Ok(false);
+            }
+        }
+    }
+
+    // Forward all other keys to the current form field's editor
+    // Extract config values before borrowing editor
+    let undo_binding = parse_key_binding(&app.config.key_bindings.undo)
+        .map_err(|e| TuiError::KeyBindingError(e))?;
+    let word_left_binding = parse_key_binding(&app.config.key_bindings.word_left)
+        .map_err(|e| TuiError::KeyBindingError(e))?;
+    let word_right_binding = parse_key_binding(&app.config.key_bindings.word_right)
+        .map_err(|e| TuiError::KeyBindingError(e))?;
+    
+    if let Some(ref mut editor) = app.get_current_form_editor() {
+        // Handle undo using config binding
+        if matches_key_event(key_event, &undo_binding) {
+            editor.undo();
+            return Ok(false);
+        }
+        
+        // Handle copy (Ctrl+C or Alt+C on macOS)
+        if crate::utils::has_primary_modifier(key_event.modifiers) && 
+           (key_event.code == KeyCode::Char('c') || key_event.code == KeyCode::Char('C')) {
+            let selected_text = editor.get_selected_text();
+            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                if let Err(e) = clipboard.set_text(&selected_text) {
+                    app.set_status_message(format!("Failed to copy to clipboard: {}", e));
+                } else if !selected_text.is_empty() {
+                    app.set_status_message("Copied to clipboard".to_string());
+                }
+            } else {
+                app.set_status_message("Failed to access clipboard".to_string());
+            }
+            return Ok(false);
+        }
+        
+        // Handle cut (Ctrl+X or Alt+X on macOS)
+        if crate::utils::has_primary_modifier(key_event.modifiers) && 
+           (key_event.code == KeyCode::Char('x') || key_event.code == KeyCode::Char('X')) {
+            let selected_text = editor.get_selected_text();
+            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                if let Err(e) = clipboard.set_text(&selected_text) {
+                    app.set_status_message(format!("Failed to copy to clipboard: {}", e));
+                } else {
+                    if !selected_text.is_empty() {
+                        editor.delete_selection();
+                        app.set_status_message("Cut to clipboard".to_string());
+                    }
+                }
+            } else {
+                app.set_status_message("Failed to access clipboard".to_string());
+            }
+            return Ok(false);
+        }
+        
+        // Handle select all (Ctrl+A or Alt+A on macOS)
+        if crate::utils::has_primary_modifier(key_event.modifiers) && 
+           (key_event.code == KeyCode::Char('a') || key_event.code == KeyCode::Char('A')) {
+            editor.select_all();
+            return Ok(false);
+        }
+        
+        // Handle word navigation using config bindings
+        
+        let extend_selection = key_event.modifiers.contains(KeyModifiers::SHIFT);
+        
+        match key_event.code {
+            KeyCode::Char(c) => {
+                // Skip if primary modifier is held (to avoid inserting 'c' or 'x' when copy/cut is intended)
+                if crate::utils::has_primary_modifier(key_event.modifiers) {
+                    return Ok(false);
+                }
+                editor.insert_char(c);
+                return Ok(false);
+            }
+            KeyCode::Backspace => {
+                editor.delete_char();
+                return Ok(false);
+            }
+            KeyCode::Up => {
+                editor.move_cursor_up(extend_selection);
+                return Ok(false);
+            }
+            KeyCode::Down => {
+                editor.move_cursor_down(extend_selection);
+                return Ok(false);
+            }
+            KeyCode::Left => {
+                if matches_key_event(key_event, &word_left_binding) {
+                    editor.move_cursor_word_left(extend_selection);
+                } else {
+                    editor.move_cursor_left(extend_selection);
+                }
+                return Ok(false);
+            }
+            KeyCode::Right => {
+                if matches_key_event(key_event, &word_right_binding) {
+                    editor.move_cursor_word_right(extend_selection);
+                } else {
+                    editor.move_cursor_right(extend_selection);
+                }
+                return Ok(false);
+            }
+            KeyCode::Home => {
+                editor.move_cursor_home(extend_selection);
+                return Ok(false);
+            }
+            KeyCode::End => {
+                editor.move_cursor_end(extend_selection);
                 return Ok(false);
             }
             _ => {
-                // Check if notebook modal binding is pressed again to toggle off
-                let notebook_modal_binding = parse_key_binding(&app.config.key_bindings.notebook_modal)
-                    .map_err(|e| TuiError::KeyBindingError(e))?;
-                let mut is_notebook_modal = matches_key_event(key_event, &notebook_modal_binding);
-                
-                // On macOS, Option+n may produce a special character (like '˜') without ALT modifier
-                // Check for this case before the character gets inserted into the editor
-                #[cfg(target_os = "macos")]
-                {
-                    if !is_notebook_modal {
-                        is_notebook_modal = match key_event.code {
-                            KeyCode::Char(c) => {
-                                // Option+n on macOS typically produces '˜' (U+02DC, small tilde)
-                                // Also check for regular tilde '~' (U+007E) depending on keyboard layout
-                                c == '˜' || c == '~'
-                            }
-                            _ => false,
-                        };
-                    }
-                }
-                
-                if is_notebook_modal {
-                    app.exit_notebook_modal_mode();
-                    return Ok(false);
-                }
+                // Ignore other keys in create mode
+                return Ok(false);
             }
         }
+    }
+    Ok(false)
+}
 
-        if let Some(ref mut state) = app.notebooks.modal_state {
-            // Handle field navigation
-            match key_event.code {
-                KeyCode::Tab => {
-                    let forward = !key_event.modifiers.contains(KeyModifiers::SHIFT);
-                    app.navigate_notebook_modal(forward);
-                    return Ok(false);
+fn handle_help_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError> {
+    match key_event.code {
+        KeyCode::Esc => {
+            app.exit_help_mode();
+            return Ok(false);
+        }
+        _ => {
+            // Check if help binding is pressed again to toggle off
+            let help_binding = parse_key_binding(&app.config.key_bindings.help)
+                .map_err(|e| TuiError::KeyBindingError(e))?;
+            if matches_key_event(key_event, &help_binding) {
+                app.exit_help_mode();
+                return Ok(false);
+            }
+            // Ignore all other keys in help mode
+            return Ok(false);
+        }
+    }
+}
+
+fn handle_notebook_modal_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError> {
+    match key_event.code {
+        KeyCode::Esc => {
+            app.exit_notebook_modal_mode();
+            return Ok(false);
+        }
+        _ => {
+            // Check if notebook modal binding is pressed again to toggle off
+            let notebook_modal_binding = parse_key_binding(&app.config.key_bindings.notebook_modal)
+                .map_err(|e| TuiError::KeyBindingError(e))?;
+            let mut is_notebook_modal = matches_key_event(key_event, &notebook_modal_binding);
+            
+            // On macOS, Option+n may produce a special character (like '˜') without ALT modifier
+            // Check for this case before the character gets inserted into the editor
+            #[cfg(target_os = "macos")]
+            {
+                if !is_notebook_modal {
+                    is_notebook_modal = match key_event.code {
+                        KeyCode::Char(c) => {
+                            // Option+n on macOS typically produces '˜' (U+02DC, small tilde)
+                            // Also check for regular tilde '~' (U+007E) depending on keyboard layout
+                            c == '˜' || c == '~'
+                        }
+                        _ => false,
+                    };
                 }
-                KeyCode::BackTab => {
-                    app.navigate_notebook_modal(false);
-                    return Ok(false);
+            }
+            
+            if is_notebook_modal {
+                app.exit_notebook_modal_mode();
+                return Ok(false);
+            }
+        }
+    }
+
+    if let Some(ref mut state) = app.notebooks.modal_state {
+        // Handle field navigation
+        match key_event.code {
+            KeyCode::Tab => {
+                let forward = !key_event.modifiers.contains(KeyModifiers::SHIFT);
+                app.navigate_notebook_modal(forward);
+                return Ok(false);
+            }
+            KeyCode::BackTab => {
+                app.navigate_notebook_modal(false);
+                return Ok(false);
+            }
+            KeyCode::Up => {
+                if matches!(state.current_field, crate::tui::app::NotebookModalField::NotebookList) {
+                    app.move_notebook_selection_up();
                 }
-                KeyCode::Up => {
-                    if matches!(state.current_field, crate::tui::app::NotebookModalField::NotebookList) {
-                        app.move_notebook_selection_up();
-                    }
-                    return Ok(false);
+                return Ok(false);
+            }
+            KeyCode::Down => {
+                if matches!(state.current_field, crate::tui::app::NotebookModalField::NotebookList) {
+                    app.move_notebook_selection_down();
                 }
-                KeyCode::Down => {
-                    if matches!(state.current_field, crate::tui::app::NotebookModalField::NotebookList) {
-                        app.move_notebook_selection_down();
-                    }
-                    return Ok(false);
-                }
-                KeyCode::Enter => {
-                    // If in Add or Rename mode, save the notebook
-                    if matches!(state.mode, crate::tui::app::NotebookModalMode::Add | crate::tui::app::NotebookModalMode::Rename) {
-                        let name = if state.name_editor.lines.is_empty() {
-                            String::new()
-                        } else {
-                            state.name_editor.lines[0].clone()
-                        };
-                        
-                        let selected_idx = state.selected_index;
-                        let mode = state.mode.clone();
-                        let notebook_id_opt = if selected_idx > 0 {
-                            app.notebooks.notebooks.get(selected_idx - 1).and_then(|n| n.id)
-                        } else {
-                            None
-                        };
-                        
-                        // Release the borrow on state by ending the if let block
-                        // We'll re-borrow after calling methods
-                        
-                        match mode {
-                            crate::tui::app::NotebookModalMode::Add => {
-                                if let Err(e) = app.add_notebook(name) {
-                                    app.set_status_message(format!("Failed to add notebook: {}", e));
+                return Ok(false);
+            }
+            KeyCode::Enter => {
+                // If in Add or Rename mode, save the notebook
+                if matches!(state.mode, crate::tui::app::NotebookModalMode::Add | crate::tui::app::NotebookModalMode::Rename) {
+                    let name = if state.name_editor.lines.is_empty() {
+                        String::new()
+                    } else {
+                        state.name_editor.lines[0].clone()
+                    };
+                    
+                    let selected_idx = state.selected_index;
+                    let mode = state.mode.clone();
+                    let notebook_id_opt = if selected_idx > 0 {
+                        app.notebooks.notebooks.get(selected_idx - 1).and_then(|n| n.id)
+                    } else {
+                        None
+                    };
+                    
+                    // Release the borrow on state by ending the if let block
+                    // We'll re-borrow after calling methods
+                    
+                    match mode {
+                        crate::tui::app::NotebookModalMode::Add => {
+                            if let Err(e) = app.add_notebook(name) {
+                                app.set_status_message(format!("Failed to add notebook: {}", e));
+                            } else {
+                                // Reload notebooks
+                                app.notebooks.notebooks = app.database.get_all_notebooks().unwrap_or_default();
+                                if let Some(ref mut new_state) = app.notebooks.modal_state {
+                                    new_state.mode = crate::tui::app::NotebookModalMode::View;
+                                    new_state.name_editor = Editor::new();
+                                }
+                            }
+                        }
+                        crate::tui::app::NotebookModalMode::Rename => {
+                            if let Some(id) = notebook_id_opt {
+                                if let Err(e) = app.rename_notebook(id, name) {
+                                    app.set_status_message(format!("Failed to rename notebook: {}", e));
                                 } else {
                                     // Reload notebooks
                                     app.notebooks.notebooks = app.database.get_all_notebooks().unwrap_or_default();
@@ -867,343 +912,100 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                                     }
                                 }
                             }
-                            crate::tui::app::NotebookModalMode::Rename => {
-                                if let Some(id) = notebook_id_opt {
-                                    if let Err(e) = app.rename_notebook(id, name) {
-                                        app.set_status_message(format!("Failed to rename notebook: {}", e));
-                                    } else {
-                                        // Reload notebooks
-                                        app.notebooks.notebooks = app.database.get_all_notebooks().unwrap_or_default();
-                                        if let Some(ref mut new_state) = app.notebooks.modal_state {
-                                            new_state.mode = crate::tui::app::NotebookModalMode::View;
-                                            new_state.name_editor = Editor::new();
-                                        }
-                                    }
-                                }
-                            }
-                            _ => {}
                         }
-                        return Ok(false);
-                    }
-                    
-                    // Otherwise, handle field actions
-                    match state.current_field {
-                        crate::tui::app::NotebookModalField::Add => {
-                            state.mode = crate::tui::app::NotebookModalMode::Add;
-                            state.name_editor = Editor::new();
-                        }
-                        crate::tui::app::NotebookModalField::Rename => {
-                            if state.selected_index > 0 {
-                                // Can't rename "[None]"
-                                let notebook_id = app.notebooks.notebooks.get(state.selected_index - 1)
-                                    .and_then(|n| n.id);
-                                if let Some(id) = notebook_id {
-                                    state.mode = crate::tui::app::NotebookModalMode::Rename;
-                                    state.name_editor = Editor::from_string(
-                                        app.notebooks.notebooks.iter()
-                                            .find(|n| n.id == Some(id))
-                                            .map(|n| n.name.clone())
-                                            .unwrap_or_default()
-                                    );
-                                }
-                            }
-                        }
-                        crate::tui::app::NotebookModalField::Delete => {
-                            if state.selected_index > 0 {
-                                // Can't delete "[None]"
-                                let notebook_id = app.notebooks.notebooks.get(state.selected_index - 1)
-                                    .and_then(|n| n.id);
-                                if let Some(id) = notebook_id {
-                                    let selected_idx = state.selected_index;
-                                    
-                                    // Release the borrow on state by ending the if let block
-                                    
-                                    if let Err(e) = app.delete_notebook(id) {
-                                        app.set_status_message(format!("Failed to delete notebook: {}", e));
-                                    } else {
-                                        // Reload notebooks and reset selection
-                                        app.notebooks.notebooks = app.database.get_all_notebooks().unwrap_or_default();
-                                        if let Some(ref mut new_state) = app.notebooks.modal_state {
-                                            if selected_idx > app.notebooks.notebooks.len() {
-                                                new_state.selected_index = app.notebooks.notebooks.len();
-                                            }
-                                            new_state.list_state.select(Some(new_state.selected_index));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        crate::tui::app::NotebookModalField::Switch => {
-                            let notebook_id = if state.selected_index == 0 {
-                                None // "[None]"
-                            } else {
-                                app.notebooks.notebooks.get(state.selected_index - 1)
-                                    .and_then(|n| n.id)
-                            };
-                            if let Err(e) = app.switch_notebook(notebook_id) {
-                                app.set_status_message(format!("Failed to switch notebook: {}", e));
-                            } else {
-                                app.exit_notebook_modal_mode();
-                            }
-                            return Ok(false);
-                        }
-                        crate::tui::app::NotebookModalField::NotebookList => {
-                            // Switch to the selected notebook
-                            let notebook_id = if state.selected_index == 0 {
-                                None // "[None]"
-                            } else {
-                                app.notebooks.notebooks.get(state.selected_index - 1)
-                                    .and_then(|n| n.id)
-                            };
-                            if let Err(e) = app.switch_notebook(notebook_id) {
-                                app.set_status_message(format!("Failed to switch notebook: {}", e));
-                            } else {
-                                app.exit_notebook_modal_mode();
-                            }
-                            return Ok(false);
-                        }
+                        _ => {}
                     }
                     return Ok(false);
                 }
-                _ => {
-                    // Handle text input for add/rename mode
-                    if matches!(state.mode, crate::tui::app::NotebookModalMode::Add | crate::tui::app::NotebookModalMode::Rename) {
-                        let undo_binding = parse_key_binding(&app.config.key_bindings.undo)
-                            .map_err(|e| TuiError::KeyBindingError(e))?;
-                        
-                        if let Some(ref mut editor) = app.get_notebook_modal_editor() {
-                            if matches_key_event(key_event, &undo_binding) {
-                                editor.undo();
-                                return Ok(false);
+                
+                // Otherwise, handle field actions
+                match state.current_field {
+                    crate::tui::app::NotebookModalField::Add => {
+                        state.mode = crate::tui::app::NotebookModalMode::Add;
+                        state.name_editor = Editor::new();
+                    }
+                    crate::tui::app::NotebookModalField::Rename => {
+                        if state.selected_index > 0 {
+                            // Can't rename "[None]"
+                            let notebook_id = app.notebooks.notebooks.get(state.selected_index - 1)
+                                .and_then(|n| n.id);
+                            if let Some(id) = notebook_id {
+                                state.mode = crate::tui::app::NotebookModalMode::Rename;
+                                state.name_editor = Editor::from_string(
+                                    app.notebooks.notebooks.iter()
+                                        .find(|n| n.id == Some(id))
+                                        .map(|n| n.name.clone())
+                                        .unwrap_or_default()
+                                );
                             }
-                            
-                            let extend_selection = key_event.modifiers.contains(KeyModifiers::SHIFT);
-                            
-                            match key_event.code {
-                                KeyCode::Char(c) => {
-                                    if crate::utils::has_primary_modifier(key_event.modifiers) {
-                                        return Ok(false);
+                        }
+                    }
+                    crate::tui::app::NotebookModalField::Delete => {
+                        if state.selected_index > 0 {
+                            // Can't delete "[None]"
+                            let notebook_id = app.notebooks.notebooks.get(state.selected_index - 1)
+                                .and_then(|n| n.id);
+                            if let Some(id) = notebook_id {
+                                let selected_idx = state.selected_index;
+                                
+                                // Release the borrow on state by ending the if let block
+                                
+                                if let Err(e) = app.delete_notebook(id) {
+                                    app.set_status_message(format!("Failed to delete notebook: {}", e));
+                                } else {
+                                    // Reload notebooks and reset selection
+                                    app.notebooks.notebooks = app.database.get_all_notebooks().unwrap_or_default();
+                                    if let Some(ref mut new_state) = app.notebooks.modal_state {
+                                        if selected_idx > app.notebooks.notebooks.len() {
+                                            new_state.selected_index = app.notebooks.notebooks.len();
+                                        }
+                                        new_state.list_state.select(Some(new_state.selected_index));
                                     }
-                                    editor.insert_char(c);
-                                    return Ok(false);
                                 }
-                                KeyCode::Backspace => {
-                                    editor.delete_char();
-                                    return Ok(false);
-                                }
-                                KeyCode::Left => {
-                                    editor.move_cursor_left(extend_selection);
-                                    return Ok(false);
-                                }
-                                KeyCode::Right => {
-                                    editor.move_cursor_right(extend_selection);
-                                    return Ok(false);
-                                }
-                                KeyCode::Home => {
-                                    editor.move_cursor_home(extend_selection);
-                                    return Ok(false);
-                                }
-                                KeyCode::End => {
-                                    editor.move_cursor_end(extend_selection);
-                                    return Ok(false);
-                                }
-                                _ => {}
                             }
                         }
                     }
-                }
-            }
-        }
-        return Ok(false);
-    }
-
-    // Handle search mode
-    if app.ui.mode == crate::tui::app::Mode::Search {
-        match key_event.code {
-            KeyCode::Esc => {
-                app.exit_search_mode();
-                return Ok(false);
-            }
-            KeyCode::Enter => {
-                app.exit_search_mode();
-                return Ok(false);
-            }
-            KeyCode::Char(c) => {
-                app.add_to_search(c);
-                return Ok(false);
-            }
-            KeyCode::Backspace => {
-                app.remove_from_search();
-                return Ok(false);
-            }
-            _ => {}
-        }
-    }
-
-    // Handle filter mode
-    if app.ui.mode == crate::tui::app::Mode::Filter {
-        match key_event.code {
-            KeyCode::Esc => {
-                app.exit_filter_mode();
-                return Ok(false);
-            }
-            KeyCode::BackTab => {
-                app.navigate_filter_field(false);
-                return Ok(false);
-            }
-            KeyCode::Tab => {
-                let forward = !key_event.modifiers.contains(KeyModifiers::SHIFT);
-                app.navigate_filter_field(forward);
-                return Ok(false);
-            }
-            KeyCode::Enter => {
-                // Check which field is active
-                if let Some(ref state) = app.filter.form_state {
-                    match state.current_field {
-                        crate::tui::app::FilterFormField::Apply => {
-                            app.apply_filters();
-                            return Ok(false);
+                    crate::tui::app::NotebookModalField::Switch => {
+                        let notebook_id = if state.selected_index == 0 {
+                            None // "[None]"
+                        } else {
+                            app.notebooks.notebooks.get(state.selected_index - 1)
+                                .and_then(|n| n.id)
+                        };
+                        if let Err(e) = app.switch_notebook(notebook_id) {
+                            app.set_status_message(format!("Failed to switch notebook: {}", e));
+                        } else {
+                            app.exit_notebook_modal_mode();
                         }
-                        crate::tui::app::FilterFormField::Clear => {
-                            app.clear_filters();
-                            app.exit_filter_mode();
-                            return Ok(false);
+                        return Ok(false);
+                    }
+                    crate::tui::app::NotebookModalField::NotebookList => {
+                        // Switch to the selected notebook
+                        let notebook_id = if state.selected_index == 0 {
+                            None // "[None]"
+                        } else {
+                            app.notebooks.notebooks.get(state.selected_index - 1)
+                                .and_then(|n| n.id)
+                        };
+                        if let Err(e) = app.switch_notebook(notebook_id) {
+                            app.set_status_message(format!("Failed to switch notebook: {}", e));
+                        } else {
+                            app.exit_notebook_modal_mode();
                         }
-                        crate::tui::app::FilterFormField::Cancel => {
-                            app.exit_filter_mode();
-                            return Ok(false);
-                        }
-                        _ => {
-                            // Navigate to next field
-                            app.navigate_filter_field(true);
-                            return Ok(false);
-                        }
+                        return Ok(false);
                     }
                 }
-            }
-            KeyCode::Up => {
-                if let Some(ref mut state) = app.filter.form_state {
-                    match state.current_field {
-                        crate::tui::app::FilterFormField::Archived => {
-                            app.move_filter_archived_up();
-                            return Ok(false);
-                        }
-                        crate::tui::app::FilterFormField::Status => {
-                            app.move_filter_status_up();
-                            return Ok(false);
-                        }
-                        crate::tui::app::FilterFormField::TagLogic => {
-                            app.move_filter_tag_logic_up();
-                            return Ok(false);
-                        }
-                        crate::tui::app::FilterFormField::Apply => {
-                            // Wrap to Cancel
-                            state.current_field = crate::tui::app::FilterFormField::Cancel;
-                            return Ok(false);
-                        }
-                        crate::tui::app::FilterFormField::Clear => {
-                            // Move to Apply
-                            state.current_field = crate::tui::app::FilterFormField::Apply;
-                            return Ok(false);
-                        }
-                        crate::tui::app::FilterFormField::Cancel => {
-                            // Move to Clear
-                            state.current_field = crate::tui::app::FilterFormField::Clear;
-                            return Ok(false);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            KeyCode::Down => {
-                if let Some(ref mut state) = app.filter.form_state {
-                    match state.current_field {
-                        crate::tui::app::FilterFormField::Archived => {
-                            app.move_filter_archived_down();
-                            return Ok(false);
-                        }
-                        crate::tui::app::FilterFormField::Status => {
-                            app.move_filter_status_down();
-                            return Ok(false);
-                        }
-                        crate::tui::app::FilterFormField::TagLogic => {
-                            app.move_filter_tag_logic_down();
-                            return Ok(false);
-                        }
-                        crate::tui::app::FilterFormField::Apply => {
-                            // Move to Clear
-                            state.current_field = crate::tui::app::FilterFormField::Clear;
-                            return Ok(false);
-                        }
-                        crate::tui::app::FilterFormField::Clear => {
-                            // Move to Cancel
-                            state.current_field = crate::tui::app::FilterFormField::Cancel;
-                            return Ok(false);
-                        }
-                        crate::tui::app::FilterFormField::Cancel => {
-                            // Wrap to Apply
-                            state.current_field = crate::tui::app::FilterFormField::Apply;
-                            return Ok(false);
-                        }
-                        _ => {}
-                    }
-                }
+                return Ok(false);
             }
             _ => {
-                // Handle text input for tags field
-                if app.is_filter_tags_field_active() {
+                // Handle text input for add/rename mode
+                if matches!(state.mode, crate::tui::app::NotebookModalMode::Add | crate::tui::app::NotebookModalMode::Rename) {
                     let undo_binding = parse_key_binding(&app.config.key_bindings.undo)
                         .map_err(|e| TuiError::KeyBindingError(e))?;
-                    let word_left_binding = parse_key_binding(&app.config.key_bindings.word_left)
-                        .map_err(|e| TuiError::KeyBindingError(e))?;
-                    let word_right_binding = parse_key_binding(&app.config.key_bindings.word_right)
-                        .map_err(|e| TuiError::KeyBindingError(e))?;
                     
-                    if let Some(ref mut editor) = app.get_current_filter_editor() {
+                    if let Some(ref mut editor) = app.get_notebook_modal_editor() {
                         if matches_key_event(key_event, &undo_binding) {
                             editor.undo();
-                            return Ok(false);
-                        }
-                        
-                        // Handle copy (Ctrl+C or Alt+C on macOS)
-                        if crate::utils::has_primary_modifier(key_event.modifiers) && 
-                           (key_event.code == KeyCode::Char('c') || key_event.code == KeyCode::Char('C')) {
-                            let selected_text = editor.get_selected_text();
-                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                if let Err(e) = clipboard.set_text(&selected_text) {
-                                    app.set_status_message(format!("Failed to copy to clipboard: {}", e));
-                                } else if !selected_text.is_empty() {
-                                    app.set_status_message("Copied to clipboard".to_string());
-                                }
-                            } else {
-                                app.set_status_message("Failed to access clipboard".to_string());
-                            }
-                            return Ok(false);
-                        }
-                        
-                        // Handle cut (Ctrl+X or Alt+X on macOS)
-                        if crate::utils::has_primary_modifier(key_event.modifiers) && 
-                           (key_event.code == KeyCode::Char('x') || key_event.code == KeyCode::Char('X')) {
-                            let selected_text = editor.get_selected_text();
-                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                if let Err(e) = clipboard.set_text(&selected_text) {
-                                    app.set_status_message(format!("Failed to copy to clipboard: {}", e));
-                                } else {
-                                    if !selected_text.is_empty() {
-                                        editor.delete_selection();
-                                        app.set_status_message("Cut to clipboard".to_string());
-                                    }
-                                }
-                            } else {
-                                app.set_status_message("Failed to access clipboard".to_string());
-                            }
-                            return Ok(false);
-                        }
-                        
-                        // Handle select all (Ctrl+A or Alt+A on macOS)
-                        if crate::utils::has_primary_modifier(key_event.modifiers) && 
-                           (key_event.code == KeyCode::Char('a') || key_event.code == KeyCode::Char('A')) {
-                            editor.select_all();
                             return Ok(false);
                         }
                         
@@ -1211,7 +1013,6 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                         
                         match key_event.code {
                             KeyCode::Char(c) => {
-                                // Skip if primary modifier is held (to avoid inserting 'c' or 'x' when copy/cut is intended)
                                 if crate::utils::has_primary_modifier(key_event.modifiers) {
                                     return Ok(false);
                                 }
@@ -1222,28 +1023,12 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                                 editor.delete_char();
                                 return Ok(false);
                             }
-                            KeyCode::Up => {
-                                editor.move_cursor_up(extend_selection);
-                                return Ok(false);
-                            }
-                            KeyCode::Down => {
-                                editor.move_cursor_down(extend_selection);
-                                return Ok(false);
-                            }
                             KeyCode::Left => {
-                                if matches_key_event(key_event, &word_left_binding) {
-                                    editor.move_cursor_word_left(extend_selection);
-                                } else {
-                                    editor.move_cursor_left(extend_selection);
-                                }
+                                editor.move_cursor_left(extend_selection);
                                 return Ok(false);
                             }
                             KeyCode::Right => {
-                                if matches_key_event(key_event, &word_right_binding) {
-                                    editor.move_cursor_word_right(extend_selection);
-                                } else {
-                                    editor.move_cursor_right(extend_selection);
-                                }
+                                editor.move_cursor_right(extend_selection);
                                 return Ok(false);
                             }
                             KeyCode::Home => {
@@ -1261,7 +1046,261 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
             }
         }
     }
+    Ok(false)
+}
 
+fn handle_search_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError> {
+    match key_event.code {
+        KeyCode::Esc => {
+            app.exit_search_mode();
+            return Ok(false);
+        }
+        KeyCode::Enter => {
+            app.exit_search_mode();
+            return Ok(false);
+        }
+        KeyCode::Char(c) => {
+            app.add_to_search(c);
+            return Ok(false);
+        }
+        KeyCode::Backspace => {
+            app.remove_from_search();
+            return Ok(false);
+        }
+        _ => Ok(false)
+    }
+}
+
+fn handle_filter_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError> {
+    match key_event.code {
+        KeyCode::Esc => {
+            app.exit_filter_mode();
+            return Ok(false);
+        }
+        KeyCode::BackTab => {
+            app.navigate_filter_field(false);
+            return Ok(false);
+        }
+        KeyCode::Tab => {
+            let forward = !key_event.modifiers.contains(KeyModifiers::SHIFT);
+            app.navigate_filter_field(forward);
+            return Ok(false);
+        }
+        KeyCode::Enter => {
+            // Check which field is active
+            if let Some(ref state) = app.filter.form_state {
+                match state.current_field {
+                    crate::tui::app::FilterFormField::Apply => {
+                        app.apply_filters();
+                        return Ok(false);
+                    }
+                    crate::tui::app::FilterFormField::Clear => {
+                        app.clear_filters();
+                        app.exit_filter_mode();
+                        return Ok(false);
+                    }
+                    crate::tui::app::FilterFormField::Cancel => {
+                        app.exit_filter_mode();
+                        return Ok(false);
+                    }
+                    _ => {
+                        // Navigate to next field
+                        app.navigate_filter_field(true);
+                        return Ok(false);
+                    }
+                }
+            } else {
+                // No form state available, ignore the Enter key
+                return Ok(false);
+            }
+        }
+        KeyCode::Up => {
+            if let Some(ref mut state) = app.filter.form_state {
+                match state.current_field {
+                    crate::tui::app::FilterFormField::Archived => {
+                        app.move_filter_archived_up();
+                        return Ok(false);
+                    }
+                    crate::tui::app::FilterFormField::Status => {
+                        app.move_filter_status_up();
+                        return Ok(false);
+                    }
+                    crate::tui::app::FilterFormField::TagLogic => {
+                        app.move_filter_tag_logic_up();
+                        return Ok(false);
+                    }
+                    crate::tui::app::FilterFormField::Apply => {
+                        // Wrap to Cancel
+                        state.current_field = crate::tui::app::FilterFormField::Cancel;
+                        return Ok(false);
+                    }
+                    crate::tui::app::FilterFormField::Clear => {
+                        // Move to Apply
+                        state.current_field = crate::tui::app::FilterFormField::Apply;
+                        return Ok(false);
+                    }
+                    crate::tui::app::FilterFormField::Cancel => {
+                        // Move to Clear
+                        state.current_field = crate::tui::app::FilterFormField::Clear;
+                        return Ok(false);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        KeyCode::Down => {
+            if let Some(ref mut state) = app.filter.form_state {
+                match state.current_field {
+                    crate::tui::app::FilterFormField::Archived => {
+                        app.move_filter_archived_down();
+                        return Ok(false);
+                    }
+                    crate::tui::app::FilterFormField::Status => {
+                        app.move_filter_status_down();
+                        return Ok(false);
+                    }
+                    crate::tui::app::FilterFormField::TagLogic => {
+                        app.move_filter_tag_logic_down();
+                        return Ok(false);
+                    }
+                    crate::tui::app::FilterFormField::Apply => {
+                        // Move to Clear
+                        state.current_field = crate::tui::app::FilterFormField::Clear;
+                        return Ok(false);
+                    }
+                    crate::tui::app::FilterFormField::Clear => {
+                        // Move to Cancel
+                        state.current_field = crate::tui::app::FilterFormField::Cancel;
+                        return Ok(false);
+                    }
+                    crate::tui::app::FilterFormField::Cancel => {
+                        // Wrap to Apply
+                        state.current_field = crate::tui::app::FilterFormField::Apply;
+                        return Ok(false);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        _ => {
+            // Handle text input for tags field
+            if app.is_filter_tags_field_active() {
+                let undo_binding = parse_key_binding(&app.config.key_bindings.undo)
+                    .map_err(|e| TuiError::KeyBindingError(e))?;
+                let word_left_binding = parse_key_binding(&app.config.key_bindings.word_left)
+                    .map_err(|e| TuiError::KeyBindingError(e))?;
+                let word_right_binding = parse_key_binding(&app.config.key_bindings.word_right)
+                    .map_err(|e| TuiError::KeyBindingError(e))?;
+                
+                if let Some(ref mut editor) = app.get_current_filter_editor() {
+                    if matches_key_event(key_event, &undo_binding) {
+                        editor.undo();
+                        return Ok(false);
+                    }
+                    
+                    // Handle copy (Ctrl+C or Alt+C on macOS)
+                    if crate::utils::has_primary_modifier(key_event.modifiers) && 
+                       (key_event.code == KeyCode::Char('c') || key_event.code == KeyCode::Char('C')) {
+                        let selected_text = editor.get_selected_text();
+                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                            if let Err(e) = clipboard.set_text(&selected_text) {
+                                app.set_status_message(format!("Failed to copy to clipboard: {}", e));
+                            } else if !selected_text.is_empty() {
+                                app.set_status_message("Copied to clipboard".to_string());
+                            }
+                        } else {
+                            app.set_status_message("Failed to access clipboard".to_string());
+                        }
+                        return Ok(false);
+                    }
+                    
+                    // Handle cut (Ctrl+X or Alt+X on macOS)
+                    if crate::utils::has_primary_modifier(key_event.modifiers) && 
+                       (key_event.code == KeyCode::Char('x') || key_event.code == KeyCode::Char('X')) {
+                        let selected_text = editor.get_selected_text();
+                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                            if let Err(e) = clipboard.set_text(&selected_text) {
+                                app.set_status_message(format!("Failed to copy to clipboard: {}", e));
+                            } else {
+                                if !selected_text.is_empty() {
+                                    editor.delete_selection();
+                                    app.set_status_message("Cut to clipboard".to_string());
+                                }
+                            }
+                        } else {
+                            app.set_status_message("Failed to access clipboard".to_string());
+                        }
+                        return Ok(false);
+                    }
+                    
+                    // Handle select all (Ctrl+A or Alt+A on macOS)
+                    if crate::utils::has_primary_modifier(key_event.modifiers) && 
+                       (key_event.code == KeyCode::Char('a') || key_event.code == KeyCode::Char('A')) {
+                        editor.select_all();
+                        return Ok(false);
+                    }
+                    
+                    let extend_selection = key_event.modifiers.contains(KeyModifiers::SHIFT);
+                    
+                    match key_event.code {
+                        KeyCode::Char(c) => {
+                            // Skip if primary modifier is held (to avoid inserting 'c' or 'x' when copy/cut is intended)
+                            if crate::utils::has_primary_modifier(key_event.modifiers) {
+                                return Ok(false);
+                            }
+                            editor.insert_char(c);
+                            return Ok(false);
+                        }
+                        KeyCode::Backspace => {
+                            editor.delete_char();
+                            return Ok(false);
+                        }
+                        KeyCode::Up => {
+                            editor.move_cursor_up(extend_selection);
+                            return Ok(false);
+                        }
+                        KeyCode::Down => {
+                            editor.move_cursor_down(extend_selection);
+                            return Ok(false);
+                        }
+                        KeyCode::Left => {
+                            if matches_key_event(key_event, &word_left_binding) {
+                                editor.move_cursor_word_left(extend_selection);
+                            } else {
+                                editor.move_cursor_left(extend_selection);
+                            }
+                            return Ok(false);
+                        }
+                        KeyCode::Right => {
+                            if matches_key_event(key_event, &word_right_binding) {
+                                editor.move_cursor_word_right(extend_selection);
+                            } else {
+                                editor.move_cursor_right(extend_selection);
+                            }
+                            return Ok(false);
+                        }
+                        KeyCode::Home => {
+                            editor.move_cursor_home(extend_selection);
+                            return Ok(false);
+                        }
+                        KeyCode::End => {
+                            editor.move_cursor_end(extend_selection);
+                            return Ok(false);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
+    // Handle global key bindings (work across all modes)
+    return handle_global_key_bindings(app, key_event);
+}
+
+fn handle_global_key_bindings(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError> {
     // Check for quit key
     let quit_binding = parse_key_binding(&app.config.key_bindings.quit)
         .map_err(|e| TuiError::KeyBindingError(e))?;
