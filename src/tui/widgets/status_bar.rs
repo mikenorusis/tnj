@@ -26,7 +26,7 @@ pub fn render_status_bar(
         // Key hints use normal styling with bullet separators
         // Intelligently fit as many hints as possible when space is limited
         let max_width = area.width as usize;
-        let separator = "  •  ";
+        let separator = " • ";
         let separator_len = separator.chars().count();
         
         let mut hints_text = String::new();

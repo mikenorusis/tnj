@@ -241,7 +241,7 @@ fn get_key_hints(app: &App) -> Vec<String> {
                 "Tab/Shift+Tab: Navigate actions".to_string(),
                 "↑/↓: Navigate notebooks".to_string(),
                 format!("{}: Select/Switch", crate::utils::format_key_binding_for_display(&app.config.key_bindings.select)),
-                format!("{}: Open notebook modal", crate::utils::format_key_binding_for_display(&app.config.key_bindings.notebook_modal)),
+                format!("{}: Notebooks", crate::utils::format_key_binding_for_display(&app.config.key_bindings.notebook_modal)),
                 "Esc: Cancel".to_string(),
             ]
         }
@@ -253,7 +253,7 @@ fn get_key_hints(app: &App) -> Vec<String> {
                 format!("{}: Delete", crate::utils::format_key_binding_for_display(&app.config.key_bindings.delete)),
                 format!("{}: Search", crate::utils::format_key_binding_for_display(&app.config.key_bindings.search)),
                 format!("{}: Filters", crate::utils::format_key_binding_for_display(&app.config.key_bindings.filter)),
-                format!("{}: Toggle sidebar", crate::utils::format_key_binding_for_display(&app.config.key_bindings.toggle_sidebar)),
+                format!("{}: Sidebar", crate::utils::format_key_binding_for_display(&app.config.key_bindings.toggle_sidebar)),
             ];
             
             // Add task-specific shortcuts when on Tasks tab
