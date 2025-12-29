@@ -1,4 +1,4 @@
-use directories::ProjectDirs;
+use directories::{ProjectDirs, BaseDirs};
 use std::path::PathBuf;
 
 /// Profile mode for the application (dev or prod)
@@ -43,7 +43,7 @@ pub fn get_data_dir(profile: Profile) -> Option<PathBuf> {
 /// Expand `~` in a path string to the user's home directory
 pub fn expand_path(path: &str) -> PathBuf {
     if path.starts_with("~/") {
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = BaseDirs::new().map(|d| d.home_dir().to_path_buf()) {
             return home.join(&path[2..]);
         }
     }
