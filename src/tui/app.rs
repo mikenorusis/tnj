@@ -643,9 +643,11 @@ impl App {
             }
             
             // If it's a heading, don't select an item
-            if is_heading[self.ui.selected_index] {
-                self.ui.selected_item = None;
-                return;
+            if let Some(&is_heading_val) = is_heading.get(self.ui.selected_index) {
+                if is_heading_val {
+                    self.ui.selected_item = None;
+                    return;
+                }
             }
             
             // Map display index to item index
