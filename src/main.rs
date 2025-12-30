@@ -1,6 +1,6 @@
 use color_eyre::Result;
 use clap::Parser;
-use tnj::{Config, Database, Profile, cli::{Cli, Commands}};
+use tnj_tui::{Config, Database, Profile, cli::{Cli, Commands}};
 
 fn main() -> Result<()> {
     // Set up error reporting with color-eyre
@@ -32,17 +32,17 @@ fn main() -> Result<()> {
     // Default to Tui if no command is provided
     match cli.command.unwrap_or(Commands::Tui) {
         Commands::Tui => {
-            let app = tnj::tui::App::new(config, db)?;
-            tnj::tui::run_event_loop(app)?;
+            let app = tnj_tui::tui::App::new(config, db)?;
+            tnj_tui::tui::run_event_loop(app)?;
         }
         Commands::AddTask { title, due, tags } => {
-            tnj::cli::handle_add_task(title, due, tags, &db)?;
+            tnj_tui::cli::handle_add_task(title, due, tags, &db)?;
         }
         Commands::AddNote { title, content, tags } => {
-            tnj::cli::handle_add_note(title, content, tags, &db)?;
+            tnj_tui::cli::handle_add_note(title, content, tags, &db)?;
         }
         Commands::AddJournal { content, title, tags } => {
-            tnj::cli::handle_add_journal(content, title, tags, &db)?;
+            tnj_tui::cli::handle_add_journal(content, title, tags, &db)?;
         }
     }
 
