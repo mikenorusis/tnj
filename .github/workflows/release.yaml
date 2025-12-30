@@ -149,12 +149,14 @@ jobs:
       contents: write   # For committing to the tap repo
     steps:
       - name: Bump Homebrew formula
-        uses: mislav/bump-homebrew-formula-action@v3.6
+        uses: mislav/bump-homebrew-formula-action@v3
         with:
           # Name of the formula file (without .rb)
           formula-name: tnj
           # Tap repository (user/repo format) where the formula should be updated
           homebrew-tap: mikenorusis/homebrew-tnj
+          # Override default source tarball URL with our universal binary URL
+          download-url: https://github.com/mikenorusis/tnj/releases/download/v${{ github.ref_name }}/tnj-macos-universal
         env:
           COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
