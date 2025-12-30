@@ -117,3 +117,18 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
+  # Step 5: Update Homebrew tap formula
+  update-homebrew-tap:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Bump Homebrew formula
+        uses: dawidd6/action-homebrew-bump-formula@v3
+        with:
+          # Your tap repo
+          tap: mikenorusis/homebrew-tnj
+          # Formula name (matches the .rb filename without extension)
+          formula: tnj
+          # Token with repo scope (create at https://github.com/settings/tokens → "repo" scope)
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+

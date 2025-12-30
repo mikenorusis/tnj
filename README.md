@@ -1,19 +1,51 @@
 # TNJ - Tasks, Notes, Journal
 
+<div align="center">
+
+![Version](https://img.shields.io/badge/version-0.1.2-blue.svg)
+![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)
+![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey.svg)
+[![Crates.io](https://img.shields.io/crates/v/tnj-tui.svg)](https://crates.io/crates/tnj-tui)
+[![GitHub release](https://img.shields.io/github/release/mikenorusis/tnj.svg)](https://github.com/mikenorusis/tnj/releases/latest)
+
 A lightweight, terminal-based application for managing tasks, notes, and journal entries. Built with Rust and featuring an intuitive TUI (Text User Interface), TNJ helps you stay organized without leaving your terminal.
+
+[Installation](#installation) • [Usage](#usage) • [Contributing](#contributing) • [License](#license)
+
+</div>
+
+---
 
 ## Features
 
-- **Task Management**: Create, organize, and track tasks with due dates, status, and tags
-- **Note Taking**: Capture and organize notes with rich content and tagging
-- **Journal Entries**: Maintain a daily journal with date-based organization
-- **Tagging System**: Organize items with tags and filter by them
-- **Notebooks**: Group related tasks, notes, and journal entries into notebooks
-- **Advanced Filtering**: Filter by tags, status, archive state, and more
-- **SQLite Database**: All data stored locally in a SQLite database
-- **Keyboard-Driven**: Fully keyboard-navigable TUI interface
-- **CLI Commands**: Quick commands to add items without opening the TUI
-- **Dev/Prod Profiles**: Separate development and production environments
+- **Task Management** - Create, organize, and track tasks with due dates, status, and tags
+- **Note Taking** - Capture and organize notes with rich content and tagging
+- **Journal Entries** - Maintain a daily journal with date-based organization
+- **Tagging System** - Organize items with tags and filter by them
+- **Notebooks** - Group related tasks, notes, and journal entries into notebooks
+- **Advanced Filtering** - Filter by tags, status, archive state, and more
+- **SQLite Database** - All data stored locally in a SQLite database
+- **Keyboard-Driven** - Fully keyboard-navigable TUI interface
+- **CLI Commands** - Quick commands to add items without opening the TUI
+- **Dev/Prod Profiles** - Separate development and production environments
+
+## Table of Contents
+
+- [Installation](#installation)
+  - [Quick Install (macOS)](#quick-install-macos)
+  - [From GitHub Releases](#from-github-releases-recommended-for-most-users)
+  - [For Rust developers](#for-rust-developers)
+  - [Build from Source](#build-from-source)
+- [Usage](#usage)
+  - [Interactive TUI Mode](#interactive-tui-mode)
+  - [CLI Commands](#cli-commands)
+  - [Development Mode](#development-mode)
+- [Configuration](#configuration)
+- [Keyboard Shortcuts](#keyboard-shortcuts)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Installation
 
@@ -187,13 +219,17 @@ cargo clippy
 
 ## Contributing
 
-Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+Contributions are welcome and greatly appreciated! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+### How to Contribute
+
+1. **Fork the repository**
+2. **Create your feature branch** (`git checkout -b feature/amazing-feature`)
+3. **Commit your changes** (`git commit -m 'Add some amazing feature'`)
+4. **Push to the branch** (`git push origin feature/amazing-feature`)
+5. **Open a Pull Request**
+
+Please make sure your code follows the existing style and passes all tests (`cargo test`).
 
 ## Dependencies
 
