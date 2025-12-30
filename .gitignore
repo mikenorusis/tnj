@@ -83,3 +83,6 @@ cobertura.xml
 lcov.info
 *.gcda
 *.gcno
+
+# cursor
+.cursor/
