@@ -121,21 +121,16 @@ jobs:
   update-homebrew-tap:
     needs: [create-release, build-and-upload]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # For committing to the tap repo
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Wait for assets to be fully available
-        run: sleep 30
-      
       - name: Bump Homebrew formula
-        uses: dawidd6/action-homebrew-bump-formula@v7
+        uses: mislav/bump-homebrew-formula-action@v3.6
         with:
-          # Required: Personal Access Token with 'public_repo' and 'workflow' scopes
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          # Your tap repo
-          tap: mikenorusis/homebrew-tnj
-          # Formula name (matches the .rb filename without extension)
-          formula: tnj
-          # Tag name (e.g., v1.0.0) - using ref_name to get just the tag without refs/tags/ prefix
-          tag: ${{ github.ref_name }}
+          # Name of the formula file (without .rb)
+          formula-name: tnj
+          # Tap repository (user/repo format) where the formula should be updated
+          homebrew-tap: mikenorusis/homebrew-tnj
+        env:
+          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 

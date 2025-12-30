@@ -34,6 +34,7 @@ A lightweight, terminal-based application for managing tasks, notes, and journal
 
 - [Installation](#installation)
   - [Quick Install (macOS)](#quick-install-macos)
+  - [Homebrew (macOS & Linux)](#homebrew-macos--linux)
   - [From GitHub Releases](#from-github-releases-recommended-for-most-users)
   - [For Rust developers](#for-rust-developers)
   - [Build from Source](#build-from-source)
@@ -57,6 +58,21 @@ curl -L https://github.com/mikenorusis/tnj/releases/latest/download/install.sh |
 
 # Install specific version
 curl -L https://github.com/mikenorusis/tnj/releases/download/v0.1.0/install.sh | sh
+```
+
+### Homebrew (macOS & Linux)
+
+Install using Homebrew (or Linuxbrew):
+
+```bash
+# Add the tap
+brew tap mikenorusis/homebrew-tnj
+
+# Install tnj
+brew install tnj
+
+# Update to latest version
+brew upgrade tnj
 ```
 
 ### From GitHub Releases (recommended for most users)
