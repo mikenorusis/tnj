@@ -156,7 +156,8 @@ jobs:
           # Tap repository (user/repo format) where the formula should be updated
           homebrew-tap: mikenorusis/homebrew-tnj
           # Override default source tarball URL with our universal binary URL
-          download-url: https://github.com/mikenorusis/tnj/releases/download/v${{ github.ref_name }}/tnj-macos-universal
+          # github.ref_name already includes the "v" prefix (e.g., "v0.1.11")
+          download-url: https://github.com/mikenorusis/tnj/releases/download/${{ github.ref_name }}/tnj-macos-universal
         env:
           COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
