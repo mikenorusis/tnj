@@ -1,8 +1,19 @@
 [package]
-name = "tnj"
+name = "tnj-tui"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
+description = "TUI Tasks, notes and journals in Notebooks"
+repository = "https://github.com/mikenorusis/tnj"
+homepage = "https://github.com/mikenorusis/tnj"
+keywords = ["cli", "tui", "terminal"]
+categories = ["command-line-utilities"]
+readme = "README.md"
+
+# This ensures `cargo install my-tui-app` works perfectly
+[[bin]]
+name = "tnj"           # ← name of the binary (default is package name)
+path = "src/main.rs"
 
 [dependencies]
 ratatui = "0.30.0"

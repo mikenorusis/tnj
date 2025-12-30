@@ -17,28 +17,47 @@ A lightweight, terminal-based application for managing tasks, notes, and journal
 
 ## Installation
 
-### Prerequisites
+### Quick Install (macOS)
 
-- Rust 1.70 or later
-- Cargo (comes with Rust)
+```bash
+# Install latest version
+curl -L https://github.com/mikenorusis/tnj/releases/latest/download/install.sh | sh
+
+# Install specific version
+curl -L https://github.com/mikenorusis/tnj/releases/download/v0.1.0/install.sh | sh
+```
+
+### From GitHub Releases (recommended for most users)
+
+Download the binary for your platform from the [latest release](https://github.com/mikenorusis/tnj/releases/latest):
+
+| Platform              | Command                                                                                           |
+|-----------------------|---------------------------------------------------------------------------------------------------|
+| macOS (Intel)         | `curl -LO https://github.com/mikenorusis/tnj/releases/latest/download/tnj-macos-x86_64 && chmod +x tnj-macos-x86_64 && sudo mv tnj-macos-x86_64 /usr/local/bin/tnj` |
+| macOS (Apple Silicon) | `curl -LO https://github.com/mikenorusis/tnj/releases/latest/download/tnj-macos-aarch64 && chmod +x tnj-macos-aarch64 && sudo mv tnj-macos-aarch64 /usr/local/bin/tnj` |
+| Windows               | Download `tnj-windows-x64.exe` and add it to your PATH                                      |
+
+### For Rust developers
+
+```bash
+cargo install tnj-tui
+```
+
+Note: The package is named `tnj-tui` on crates.io, but the binary is still called `tnj`.
 
 ### Build from Source
 
+If you want to build from source:
+
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/tnj.git
+git clone https://github.com/mikenorusis/tnj.git
 cd tnj
 
 # Build the project
 cargo build --release
 
 # The binary will be in target/release/tnj
-```
-
-### Install with Cargo
-
-```bash
-cargo install --path .
 ```
 
 ## Usage
