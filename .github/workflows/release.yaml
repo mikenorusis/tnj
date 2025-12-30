@@ -136,6 +136,6 @@ jobs:
           tap: mikenorusis/homebrew-tnj
           # Formula name (matches the .rb filename without extension)
           formula: tnj
-          # Tag will be automatically extracted from GITHUB_REF
-          tag: ${{ github.ref }}
+          # Tag name (e.g., v1.0.0) - using ref_name to get just the tag without refs/tags/ prefix
+          tag: ${{ github.ref_name }}
 
