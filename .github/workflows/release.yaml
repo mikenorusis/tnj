@@ -32,12 +32,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: macos-15-intel    # Intel macOS
-            target: x86_64-apple-darwin
-            name: tnj-macos-x86_64
-          - os: macos-latest      # Apple Silicon macOS
-            target: aarch64-apple-darwin
-            name: tnj-macos-aarch64
+          - os: macos-latest  # Use latest ARM runner for lipo
+            target: universal-apple-darwin  # Custom name
+            name: tnj-macos-universal
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             name: tnj-windows-x64.exe
@@ -46,7 +43,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
+      - name: Install Rust toolchain (macOS universal)
+        if: matrix.target == 'universal-apple-darwin'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Install Rust toolchain (Windows)
+        if: matrix.target != 'universal-apple-darwin'
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -61,15 +65,35 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Build release binary
+      - name: Build x86_64 macOS binary
+        if: matrix.target == 'universal-apple-darwin'
+        run: cargo build --release --target x86_64-apple-darwin
+
+      - name: Build aarch64 macOS binary
+        if: matrix.target == 'universal-apple-darwin'
+        run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Create universal binary with lipo
+        if: matrix.target == 'universal-apple-darwin'
+        run: |
+          mkdir -p target/universal-apple-darwin/release
+          lipo -create -output target/universal-apple-darwin/release/tnj \
+            target/x86_64-apple-darwin/release/tnj \
+            target/aarch64-apple-darwin/release/tnj
+
+      - name: Build release binary (Windows)
+        if: matrix.target != 'universal-apple-darwin'
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Prepare staged binary
         shell: bash
         run: |
           mkdir staging
-          cp "target/${{ matrix.target }}/release/tnj${{ matrix.os == 'windows-latest' && '.exe' || '' }}" \
-             "staging/${{ matrix.name }}"
+          if [ "${{ matrix.target }}" = "universal-apple-darwin" ]; then
+            cp "target/${{ matrix.target }}/release/tnj" "staging/${{ matrix.name }}"
+          else
+            cp "target/${{ matrix.target }}/release/tnj.exe" "staging/${{ matrix.name }}"
+          fi
 
       - name: Upload binary to release
         uses: actions/upload-release-asset@v1
