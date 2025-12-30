@@ -13,6 +13,8 @@ A lightweight, terminal-based application for managing tasks, notes, and journal
 
 [Installation](#installation) • [Usage](#usage) • [Contributing](#contributing) • [License](#license)
 
+![TNJ Screenshot](./tnj-scrn.gif)
+
 </div>
 
 ---
