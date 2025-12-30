@@ -122,13 +122,20 @@ jobs:
     needs: [create-release, build-and-upload]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      
+      - name: Wait for assets to be fully available
+        run: sleep 30
+      
       - name: Bump Homebrew formula
-        uses: dawidd6/action-homebrew-bump-formula@v3
+        uses: dawidd6/action-homebrew-bump-formula@v7
         with:
+          # Required: Personal Access Token with 'public_repo' and 'workflow' scopes
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           # Your tap repo
           tap: mikenorusis/homebrew-tnj
           # Formula name (matches the .rb filename without extension)
           formula: tnj
-          # Token with repo scope (create at https://github.com/settings/tokens → "repo" scope)
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # Tag will be automatically extracted from GITHUB_REF
+          tag: ${{ github.ref }}
 
