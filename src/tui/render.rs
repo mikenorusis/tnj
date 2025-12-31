@@ -206,14 +206,54 @@ fn get_key_hints(app: &App) -> Vec<String> {
             ]
         }
         crate::tui::app::Mode::Settings => {
-            vec![
-                format!("Esc or {}: Exit settings", crate::utils::format_key_binding_for_display(&app.config.key_bindings.settings)),
-                format!("{}: Apply setting", crate::utils::format_key_binding_for_display(&app.config.key_bindings.select)),
-                "↑/↓: Navigate categories".to_string(),
-                format!("{}/{}: Navigate options", 
-                    crate::utils::format_key_binding_for_display(&app.config.key_bindings.list_up),
-                    crate::utils::format_key_binding_for_display(&app.config.key_bindings.list_down)),
-            ]
+            let categories = app.get_settings_categories();
+            let is_theme_settings = categories.get(app.settings.category_index)
+                .map(|c| c == "Theme Settings")
+                .unwrap_or(false);
+            
+            let mut hints = vec![
+                format!("Esc/{}: Exit", crate::utils::format_key_binding_for_display(&app.config.key_bindings.settings)),
+            ];
+            
+            match app.settings.current_field {
+                crate::tui::app::SettingsField::CategoryList => {
+                    hints.push("↑/↓: Navigate categories".to_string());
+                    hints.push("Tab: Enter settings".to_string());
+                    hints.push(format!("{}: Enter settings", crate::utils::format_key_binding_for_display(&app.config.key_bindings.select)));
+                }
+                crate::tui::app::SettingsField::SettingsContent => {
+                    hints.push("Tab: Back".to_string());
+                    
+                    if is_theme_settings {
+                        if app.settings.color_input_mode {
+                            hints.push("Enter: Apply color".to_string());
+                            hints.push("Esc: Cancel input".to_string());
+                        } else if app.settings.color_save_theme_name_editor.is_some() {
+                            hints.push("Enter: Save theme".to_string());
+                            hints.push("Esc: Cancel".to_string());
+                        } else {
+                            if app.settings.in_theme_list_area {
+                                hints.push("↑/↓: Navigate themes".to_string());
+                                hints.push(format!("{}: Select theme", crate::utils::format_key_binding_for_display(&app.config.key_bindings.select)));
+                                hints.push("Tab: Color Options".to_string());
+                                hints.push("Shift+Tab: Back".to_string());
+                            } else {
+                                hints.push("↑/↓: Navigate fields".to_string());
+                                hints.push("Tab/Shift+Tab: Move".to_string());
+                                hints.push("←/→: Cycle colors".to_string());
+                                hints.push("i: Input mode".to_string());
+                                hints.push("r: Reset to theme".to_string());
+                                hints.push("s: Save as theme".to_string());
+                            }
+                        }
+                    } else {
+                        hints.push("↑/↓: Navigate options".to_string());
+                        hints.push(format!("{}: Apply setting", crate::utils::format_key_binding_for_display(&app.config.key_bindings.select)));
+                    }
+                }
+            }
+            
+            hints
         }
         crate::tui::app::Mode::Create => {
             vec![

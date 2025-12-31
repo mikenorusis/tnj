@@ -54,8 +54,12 @@ pub fn render_tabs(f: &mut Frame, area: Rect, current_tab: Tab, config: &Config,
     let notebook_area = horizontal[1];
     
     // Render tabs with space divider between boxes
-    // Use contrast-aware text color for selected tab
-    let highlight_fg = get_contrast_text_color(highlight_bg);
+    // Use highlight_fg from theme, or calculate if not set
+    let highlight_fg = if active_theme.highlight_fg.is_empty() {
+        get_contrast_text_color(highlight_bg)
+    } else {
+        parse_color(&active_theme.highlight_fg)
+    };
     
     let tabs = Tabs::new(titles)
         .select(tab_index)

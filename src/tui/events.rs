@@ -148,10 +148,16 @@ pub fn run_event_loop(mut app: App) -> Result<(), TuiError> {
 
         // Render
         // for edit mode, which handles cursor positioning atomically with rendering
+        // Get terminal size explicitly to ensure compatibility across different terminals
+        let terminal_size = terminal.size()?;
+        use ratatui::layout::Rect;
+        let terminal_rect = Rect::new(0, 0, terminal_size.width, terminal_size.height);
         terminal.draw(|f| {
             use crate::tui::layout::Layout;
+            // Use explicit terminal size instead of f.area() for better compatibility
+            // f.area() should match, but some terminals (like Ghostty) may report differently
             let layout = Layout::calculate(
-                f.area(),
+                terminal_rect,
                 app.config.sidebar_width_percent,
                 app.ui.sidebar_state == crate::tui::app::SidebarState::Collapsed,
             );
@@ -169,9 +175,10 @@ pub fn run_event_loop(mut app: App) -> Result<(), TuiError> {
                         }
                     }
                 }
-                Event::Resize(_, _) => {
-                    // Terminal will automatically update on next draw, but we can clear any cached state if needed
-                    // The layout is recalculated on each render, so no action needed here
+                Event::Resize(_width, _height) => {
+                    // Force immediate redraw on resize to ensure layout updates correctly
+                    // Some terminals (like Ghostty) may need explicit handling
+                    // The terminal.size() will be refreshed on next draw
                 }
                 _ => {
                     // Ignore other event types (mouse, etc.)
@@ -447,6 +454,384 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
     // Handle settings mode
     // Only handle Esc and settings binding here; other keys fall through to global bindings
     if app.ui.mode == crate::tui::app::Mode::Settings {
+        let categories = app.get_settings_categories();
+        let is_theme_settings = categories.get(app.settings.category_index)
+            .map(|c| c == "Theme Settings")
+            .unwrap_or(false);
+        
+        // Handle Tab/Shift+Tab to navigate between fields
+        // But only if not in a special input mode
+        match key_event.code {
+            KeyCode::Tab | KeyCode::BackTab => {
+                // Don't handle Tab if in color input mode or save theme name mode
+                if !(is_theme_settings && app.settings.color_input_mode) &&
+                   !(is_theme_settings && app.settings.color_save_theme_name_editor.is_some()) {
+                    let forward = key_event.code == KeyCode::Tab && 
+                                 !key_event.modifiers.contains(KeyModifiers::SHIFT);
+                    
+                    // If in SettingsContent and Theme Settings, Tab moves between Theme and Color Options fields
+                    if app.settings.current_field == crate::tui::app::SettingsField::SettingsContent && 
+                       is_theme_settings {
+                        if app.settings.in_theme_list_area {
+                            // In Theme field: Shift+Tab moves back to CategoryList, Tab moves to Color Options
+                            if !forward {
+                                // Shift+Tab from Theme: move back to CategoryList
+                                app.settings.current_field = crate::tui::app::SettingsField::CategoryList;
+                            } else {
+                                // Tab from Theme: move to Color Options
+                                app.settings.in_theme_list_area = false;
+                                app.settings.color_field_index = 0;
+                                // Initialize cycle indices based on current color values
+                                app.initialize_color_cycle_indices();
+                            }
+                        } else {
+                            // In Color Options: Tab/Shift+Tab moves between color fields
+                            // Tab from last field moves back to CategoryList, Shift+Tab from first field moves back to Theme
+                            let is_first_field = app.settings.color_field_index == 0;
+                            let is_last_field = app.settings.color_field_index == 4;
+                            
+                            if forward {
+                                // Tab: move to next color field, or back to CategoryList if at last field
+                                if is_last_field {
+                                    app.settings.current_field = crate::tui::app::SettingsField::CategoryList;
+                                } else {
+                                    app.move_color_field(true);
+                                }
+                            } else {
+                                // Shift+Tab: move to previous color field, or back to Theme if at first field
+                                if is_first_field {
+                                    app.settings.in_theme_list_area = true;
+                                } else {
+                                    app.move_color_field(false);
+                                }
+                            }
+                        }
+                        return Ok(false);
+                    } else {
+                        // For other settings or when in CategoryList:
+                        // Tab from SettingsContent or Shift+Tab from CategoryList moves between CategoryList and SettingsContent
+                        if app.settings.current_field == crate::tui::app::SettingsField::SettingsContent && forward {
+                            // Tab from SettingsContent: move back to CategoryList
+                            app.settings.current_field = crate::tui::app::SettingsField::CategoryList;
+                        } else if app.settings.current_field == crate::tui::app::SettingsField::CategoryList && !forward {
+                            // Shift+Tab from CategoryList: move to SettingsContent
+                            app.settings.current_field = crate::tui::app::SettingsField::SettingsContent;
+                            if is_theme_settings {
+                                app.settings.in_theme_list_area = true;
+                            }
+                        } else {
+                            // Regular Tab navigation
+                            app.navigate_settings_fields();
+                        }
+                        return Ok(false);
+                    }
+                }
+            }
+            _ => {}
+        }
+        
+        // Handle navigation based on current field
+        match app.settings.current_field {
+            crate::tui::app::SettingsField::CategoryList => {
+                // In category list: Up/Down navigates categories
+                match key_event.code {
+                    KeyCode::Up => {
+                        app.move_settings_category_up();
+                        return Ok(false);
+                    }
+                    KeyCode::Down => {
+                        app.move_settings_category_down();
+                        return Ok(false);
+                    }
+                    _ => {
+                        // Other keys fall through to settings content handling
+                    }
+                }
+            }
+            crate::tui::app::SettingsField::SettingsContent => {
+                // In settings content: handle based on category
+                // This will be handled below
+            }
+        }
+        
+        // Handle color editor input mode
+        if is_theme_settings && app.settings.color_input_mode {
+            // Extract undo binding before borrowing editor
+            let undo_binding = parse_key_binding(&app.config.key_bindings.undo)
+                .map_err(|e| TuiError::KeyBindingError(e))?;
+            let is_undo = matches_key_event(key_event, &undo_binding);
+            
+            if let Some(ref mut editor) = app.get_color_input_editor() {
+                match key_event.code {
+                    KeyCode::Enter => {
+                        match app.validate_and_apply_color_input() {
+                            Ok(()) => {
+                                // Success - already handled in validate_and_apply_color_input
+                            }
+                            Err(e) => {
+                                app.settings.color_input_error = Some(e);
+                            }
+                        }
+                        return Ok(false);
+                    }
+                    KeyCode::Esc => {
+                        app.exit_color_input_mode();
+                        return Ok(false);
+                    }
+                    KeyCode::Tab | KeyCode::BackTab => {
+                        // Exit input mode and move to next field
+                        app.exit_color_input_mode();
+                        let forward = key_event.code == KeyCode::Tab && 
+                                     !key_event.modifiers.contains(KeyModifiers::SHIFT);
+                        app.move_color_field(forward);
+                        return Ok(false);
+                    }
+                    KeyCode::Up | KeyCode::Down => {
+                        // Exit input mode and move field
+                        app.exit_color_input_mode();
+                        if key_event.code == KeyCode::Up {
+                            app.move_color_field_up();
+                        } else {
+                            app.move_color_field_down();
+                        }
+                        return Ok(false);
+                    }
+                    _ => {
+                        // Forward to editor
+                        if is_undo {
+                            editor.undo();
+                            return Ok(false);
+                        }
+                        
+                        let extend_selection = key_event.modifiers.contains(KeyModifiers::SHIFT);
+                        match key_event.code {
+                            KeyCode::Char(c) => {
+                                if crate::utils::has_primary_modifier(key_event.modifiers) {
+                                    return Ok(false);
+                                }
+                                editor.insert_char(c);
+                                return Ok(false);
+                            }
+                            KeyCode::Backspace => {
+                                editor.delete_char();
+                                return Ok(false);
+                            }
+                            KeyCode::Left => {
+                                editor.move_cursor_left(extend_selection);
+                                return Ok(false);
+                            }
+                            KeyCode::Right => {
+                                editor.move_cursor_right(extend_selection);
+                                return Ok(false);
+                            }
+                            KeyCode::Home => {
+                                editor.move_cursor_home(extend_selection);
+                                return Ok(false);
+                            }
+                            KeyCode::End => {
+                                editor.move_cursor_end(extend_selection);
+                                return Ok(false);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Handle settings content navigation (only when SettingsContent is active)
+        if app.settings.current_field == crate::tui::app::SettingsField::SettingsContent {
+            // Handle color editor navigation and cycling (when not in input mode)
+            if is_theme_settings && !app.settings.color_input_mode {
+                match key_event.code {
+                    KeyCode::Up => {
+                        if app.settings.in_theme_list_area {
+                            // Navigate within theme list only
+                            if app.settings.theme_index > 0 {
+                                app.settings.theme_index -= 1;
+                                app.settings.theme_list_state.select(Some(app.settings.theme_index));
+                            }
+                        } else {
+                            // Navigate within color fields only
+                            app.move_color_field_up();
+                        }
+                        return Ok(false);
+                    }
+                    KeyCode::Down => {
+                        if app.settings.in_theme_list_area {
+                            // Navigate within theme list only
+                            let themes = app.get_available_themes();
+                            if app.settings.theme_index < themes.len().saturating_sub(1) {
+                                app.settings.theme_index += 1;
+                                app.settings.theme_list_state.select(Some(app.settings.theme_index));
+                            }
+                        } else {
+                            // Navigate within color fields only
+                            app.move_color_field_down();
+                        }
+                        return Ok(false);
+                    }
+                    KeyCode::Left => {
+                        // Only cycle colors when in color fields area
+                        if !app.settings.in_theme_list_area {
+                            app.cycle_color_left();
+                        }
+                        return Ok(false);
+                    }
+                    KeyCode::Right => {
+                        // Only cycle colors when in color fields area
+                        if !app.settings.in_theme_list_area {
+                            app.cycle_color_right();
+                        }
+                        return Ok(false);
+                    }
+                    KeyCode::Char('i') => {
+                        // Only enter input mode when in color fields area
+                        if !app.settings.in_theme_list_area {
+                            app.enter_color_input_mode();
+                        }
+                        return Ok(false);
+                    }
+                    KeyCode::Char('r') => {
+                        // Only reset colors when in color fields area
+                        if !app.settings.in_theme_list_area {
+                            if let Err(e) = app.reset_color_overrides() {
+                                app.set_status_message(format!("Failed to reset colors: {}", e));
+                            }
+                        }
+                        return Ok(false);
+                    }
+                    KeyCode::Char('s') => {
+                        // Only save as theme when in color fields area
+                        if !app.settings.in_theme_list_area {
+                            app.enter_save_theme_name_mode();
+                        }
+                        return Ok(false);
+                    }
+                    KeyCode::Tab | KeyCode::BackTab => {
+                        // Tab navigation is handled above in the main Tab handler
+                        // This should not be reached, but keep for safety
+                        return Ok(false);
+                    }
+                    _ => {}
+                }
+            }
+            
+            // Handle other settings categories (Appearance, Display, System)
+            if !is_theme_settings {
+                match key_event.code {
+                    KeyCode::Up => {
+                        let category = categories.get(app.settings.category_index);
+                        if let Some(cat) = category {
+                            if cat == "Appearance Settings" {
+                                app.move_settings_sidebar_width_up();
+                            } else if cat == "Display Settings" {
+                                app.move_settings_display_mode_up();
+                            }
+                        }
+                        return Ok(false);
+                    }
+                    KeyCode::Down => {
+                        let category = categories.get(app.settings.category_index);
+                        if let Some(cat) = category {
+                            if cat == "Appearance Settings" {
+                                app.move_settings_sidebar_width_down();
+                            } else if cat == "Display Settings" {
+                                app.move_settings_display_mode_down();
+                            }
+                        }
+                        return Ok(false);
+                    }
+                    KeyCode::Tab | KeyCode::BackTab => {
+                        // For other categories, Tab doesn't do anything special yet
+                        // Could be used for future field navigation
+                        return Ok(false);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        
+        // Handle save theme name input mode
+        if is_theme_settings && app.settings.color_save_theme_name_editor.is_some() {
+            // Extract undo binding before borrowing editor
+            let undo_binding = parse_key_binding(&app.config.key_bindings.undo)
+                .map_err(|e| TuiError::KeyBindingError(e))?;
+            let is_undo = matches_key_event(key_event, &undo_binding);
+            
+            if let Some(ref mut editor) = app.get_save_theme_name_editor() {
+                match key_event.code {
+                    KeyCode::Enter => {
+                        let name = if editor.lines.is_empty() {
+                            String::new()
+                        } else {
+                            editor.lines[0].clone()
+                        };
+                        if name.is_empty() {
+                            app.set_status_message("Theme name cannot be empty".to_string());
+                            // Exit save theme name mode on empty name error
+                            app.exit_save_theme_name_mode();
+                        } else {
+                            match app.save_theme_from_overrides(&name) {
+                                Ok(()) => {
+                                    app.exit_save_theme_name_mode();
+                                }
+                                Err(e) => {
+                                    app.set_status_message(format!("Failed to save theme: {}", e));
+                                    // Exit save theme name mode on error so user can continue editing
+                                    app.exit_save_theme_name_mode();
+                                }
+                            }
+                        }
+                        return Ok(false);
+                    }
+                    KeyCode::Esc => {
+                        app.exit_save_theme_name_mode();
+                        return Ok(false);
+                    }
+                    _ => {
+                        // Forward to editor
+                        if is_undo {
+                            editor.undo();
+                            return Ok(false);
+                        }
+                        
+                        let extend_selection = key_event.modifiers.contains(KeyModifiers::SHIFT);
+                        match key_event.code {
+                            KeyCode::Char(c) => {
+                                if crate::utils::has_primary_modifier(key_event.modifiers) {
+                                    return Ok(false);
+                                }
+                                editor.insert_char(c);
+                                return Ok(false);
+                            }
+                            KeyCode::Backspace => {
+                                editor.delete_char();
+                                return Ok(false);
+                            }
+                            KeyCode::Left => {
+                                editor.move_cursor_left(extend_selection);
+                                return Ok(false);
+                            }
+                            KeyCode::Right => {
+                                editor.move_cursor_right(extend_selection);
+                                return Ok(false);
+                            }
+                            KeyCode::Home => {
+                                editor.move_cursor_home(extend_selection);
+                                return Ok(false);
+                            }
+                            KeyCode::End => {
+                                editor.move_cursor_end(extend_selection);
+                                return Ok(false);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        
         match key_event.code {
             KeyCode::Esc => {
                 app.exit_settings_mode();
@@ -1588,24 +1973,36 @@ fn handle_global_key_bindings(app: &mut App, key_event: KeyEvent) -> Result<bool
     let select_binding = parse_key_binding(&app.config.key_bindings.select)
         .map_err(|e| TuiError::KeyBindingError(e))?;
     if matches_key_event(key_event, &select_binding) {
-        // In Settings mode, Enter applies selected setting based on category
+        // In Settings mode, Enter applies selected setting based on category and current field
         if app.ui.mode == crate::tui::app::Mode::Settings {
             let categories = app.get_settings_categories();
             if let Some(category) = categories.get(app.settings.category_index) {
-                if category == "Theme Settings" {
-                    let themes = app.get_available_themes();
-                    if let Some(theme_name) = themes.get(app.settings.theme_index) {
-                        if let Err(e) = app.select_theme(theme_name) {
-                            app.set_status_message(format!("Failed to change theme: {}", e));
+                // If in CategoryList, Enter moves to SettingsContent
+                if app.settings.current_field == crate::tui::app::SettingsField::CategoryList {
+                    app.settings.current_field = crate::tui::app::SettingsField::SettingsContent;
+                    // Reset theme list area state when entering SettingsContent
+                    app.settings.in_theme_list_area = true;
+                } else {
+                    // In SettingsContent, Enter applies the selected setting
+                    if category == "Theme Settings" {
+                        // If in theme list area, select theme
+                        if app.settings.in_theme_list_area {
+                            let themes = app.get_available_themes();
+                            if let Some(theme_name) = themes.get(app.settings.theme_index) {
+                                if let Err(e) = app.select_theme(theme_name) {
+                                    app.set_status_message(format!("Failed to change theme: {}", e));
+                                }
+                            }
                         }
-                    }
-                } else if category == "Appearance Settings" {
-                    if let Err(e) = app.apply_sidebar_width() {
-                        app.set_status_message(format!("Failed to change sidebar width: {}", e));
-                    }
-                } else if category == "Display Settings" {
-                    if let Err(e) = app.apply_display_mode() {
-                        app.set_status_message(format!("Failed to change display mode: {}", e));
+                        // If in color fields area, Enter doesn't do anything (use 'i' for input mode)
+                    } else if category == "Appearance Settings" {
+                        if let Err(e) = app.apply_sidebar_width() {
+                            app.set_status_message(format!("Failed to change sidebar width: {}", e));
+                        }
+                    } else if category == "Display Settings" {
+                        if let Err(e) = app.apply_display_mode() {
+                            app.set_status_message(format!("Failed to change display mode: {}", e));
+                        }
                     }
                 }
             }

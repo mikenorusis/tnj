@@ -13,7 +13,11 @@ pub fn render_filter_modal(f: &mut Frame, area: Rect, app: &App) {
     let fg_color = parse_color(&active_theme.fg);
     let bg_color = parse_color(&active_theme.bg);
     let highlight_bg = parse_color(&active_theme.highlight_bg);
-    let highlight_fg = get_contrast_text_color(highlight_bg);
+    let highlight_fg = if active_theme.highlight_fg.is_empty() {
+        get_contrast_text_color(highlight_bg)
+    } else {
+        parse_color(&active_theme.highlight_fg)
+    };
     
     // Calculate popup area (70% width, 60% height, centered)
     let popup_area = popup_area(area, 70, 60);

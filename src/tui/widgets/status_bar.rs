@@ -19,8 +19,12 @@ pub fn render_status_bar(
 
     let (mut content, style) = if let Some(msg) = message {
         // Status messages get a highlighted background for visibility
-        // Use contrast-aware text color
-        let msg_fg = get_contrast_text_color(highlight_bg);
+        // Use highlight_fg from theme, or calculate if not set
+        let msg_fg = if active_theme.highlight_fg.is_empty() {
+            get_contrast_text_color(highlight_bg)
+        } else {
+            parse_color(&active_theme.highlight_fg)
+        };
         (msg.clone(), Style::default().fg(msg_fg).bg(highlight_bg).add_modifier(Modifier::BOLD))
     } else {
         // Key hints use normal styling with bullet separators
