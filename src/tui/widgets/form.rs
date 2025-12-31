@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span};
 use crate::Config;
 use crate::tui::app::{TaskForm, NoteForm, JournalForm, TaskField, NoteField, JournalField};
 use crate::tui::widgets::editor::Editor;
-use crate::tui::widgets::color::parse_color;
+use crate::tui::widgets::color::{parse_color, get_contrast_text_color};
 use crate::models::Notebook;
 
 /// Helper function to wrap a long line to fit within a given width
@@ -375,9 +375,15 @@ pub fn render_task_form(f: &mut Frame, area: Rect, form: &TaskForm, config: &Con
     }
 
     let active_theme = config.get_active_theme();
+    let highlight_bg = parse_color(&active_theme.highlight_bg);
+    let highlight_fg = if active_theme.highlight_fg.is_empty() {
+        get_contrast_text_color(highlight_bg)
+    } else {
+        parse_color(&active_theme.highlight_fg)
+    };
     let highlight_style = Style::default()
-        .bg(parse_color(&active_theme.highlight_bg))
-        .fg(parse_color(&active_theme.fg));
+        .bg(highlight_bg)
+        .fg(highlight_fg);
     let inactive_field_style = Style::default()
         .fg(parse_color(&active_theme.fg))
         .add_modifier(Modifier::DIM);
@@ -512,9 +518,15 @@ pub fn render_note_form(f: &mut Frame, area: Rect, form: &NoteForm, config: &Con
     }
 
     let active_theme = config.get_active_theme();
+    let highlight_bg = parse_color(&active_theme.highlight_bg);
+    let highlight_fg = if active_theme.highlight_fg.is_empty() {
+        get_contrast_text_color(highlight_bg)
+    } else {
+        parse_color(&active_theme.highlight_fg)
+    };
     let highlight_style = Style::default()
-        .bg(parse_color(&active_theme.highlight_bg))
-        .fg(parse_color(&active_theme.fg));
+        .bg(highlight_bg)
+        .fg(highlight_fg);
     let inactive_field_style = Style::default()
         .fg(parse_color(&active_theme.fg))
         .add_modifier(Modifier::DIM);
@@ -639,9 +651,15 @@ pub fn render_journal_form(f: &mut Frame, area: Rect, form: &JournalForm, config
     }
 
     let active_theme = config.get_active_theme();
+    let highlight_bg = parse_color(&active_theme.highlight_bg);
+    let highlight_fg = if active_theme.highlight_fg.is_empty() {
+        get_contrast_text_color(highlight_bg)
+    } else {
+        parse_color(&active_theme.highlight_fg)
+    };
     let highlight_style = Style::default()
-        .bg(parse_color(&active_theme.highlight_bg))
-        .fg(parse_color(&active_theme.fg));
+        .bg(highlight_bg)
+        .fg(highlight_fg);
     let inactive_field_style = Style::default()
         .fg(parse_color(&active_theme.fg))
         .add_modifier(Modifier::DIM);

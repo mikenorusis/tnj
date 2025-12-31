@@ -1,4 +1,5 @@
 use crate::{Config, Database, models::{Task, Note, JournalEntry, Notebook}};
+use crate::config::{ConfigError, Theme};
 use crate::database::DatabaseError;
 use crate::tui::widgets::editor::Editor;
 use ratatui::widgets::ListState;
@@ -231,25 +232,60 @@ impl Default for FilterState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorField {
+    Foreground,
+    Background,
+    Highlight,
+    HighlightFg,
+    TabBg,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsField {
+    CategoryList,
+    SettingsContent,
+}
+
 #[derive(Debug, Clone)]
 pub struct SettingsState {
+    pub current_field: SettingsField,
     pub category_index: usize,
     pub theme_index: usize,
     pub list_state: ListState,
     pub theme_list_state: ListState,
     pub sidebar_width_index: usize,
     pub display_mode_index: usize,
+    // Color editor state
+    pub color_field_index: usize,
+    pub color_cycle_indices: [usize; 5],
+    pub color_input_mode: bool,
+    pub color_input_field_index: Option<usize>,
+    pub color_input_editor: Editor,
+    pub color_input_error: Option<String>,
+    pub color_save_theme_name_editor: Option<Editor>,
+    // Track if we're in theme list area or color fields area (for Theme Settings)
+    pub in_theme_list_area: bool,
 }
 
 impl Default for SettingsState {
     fn default() -> Self {
         Self {
+            current_field: SettingsField::CategoryList,
             category_index: 0,
             theme_index: 0,
             list_state: ListState::default(),
             theme_list_state: ListState::default(),
             sidebar_width_index: 0,
             display_mode_index: 0,
+            color_field_index: 0,
+            color_cycle_indices: [0; 5],
+            color_input_mode: false,
+            color_input_field_index: None,
+            color_input_editor: Editor::new(),
+            color_input_error: None,
+            color_save_theme_name_editor: None,
+            in_theme_list_area: true, // Start in theme list area
         }
     }
 }
@@ -399,12 +435,21 @@ impl App {
                 form_state: None,
             },
             settings: SettingsState {
+                current_field: SettingsField::CategoryList,
                 category_index: 0,
                 theme_index: 0,
                 list_state: ListState::default(),
                 theme_list_state: ListState::default(),
                 sidebar_width_index: 0,
                 display_mode_index: 0,
+                color_field_index: 0,
+                color_cycle_indices: [0; 5],
+                color_input_mode: false,
+                color_input_field_index: None,
+                color_input_editor: Editor::new(),
+                color_input_error: None,
+                color_save_theme_name_editor: None,
+                in_theme_list_area: true, // Start in theme list area
             },
             modals: ModalState {
                 delete_confirmation: None,
@@ -904,7 +949,7 @@ impl App {
             ListViewMode::GroupedByTags => "GroupedByTags",
         };
         self.config.list_view_mode = mode_str.to_string();
-        if let Err(e) = self.config.save() {
+        if let Err(e) = self.save_config() {
             // Log error but don't fail - this is a non-critical operation
             eprintln!("Failed to save display mode: {}", e);
         }
@@ -1299,11 +1344,35 @@ impl App {
         self.init_settings_state();
     }
 
+    /// Navigate settings fields (CategoryList <-> SettingsContent)
+    pub fn navigate_settings_fields(&mut self) {
+        let categories = self.get_settings_categories();
+        let is_theme_settings = categories.get(self.settings.category_index)
+            .map(|c| c == "Theme Settings")
+            .unwrap_or(false);
+        
+        self.settings.current_field = match self.settings.current_field {
+            SettingsField::CategoryList => {
+                SettingsField::SettingsContent
+            }
+            SettingsField::SettingsContent => {
+                SettingsField::CategoryList
+            }
+        };
+        
+        // When entering SettingsContent for Theme Settings, start in theme list area
+        if self.settings.current_field == SettingsField::SettingsContent && is_theme_settings {
+            self.settings.in_theme_list_area = true;
+        }
+    }
+
     /// Move settings category selection up
     pub fn move_settings_category_up(&mut self) {
         if self.settings.category_index > 0 {
             self.settings.category_index -= 1;
             self.settings.list_state.select(Some(self.settings.category_index));
+            // Reset theme list area when changing categories
+            self.settings.in_theme_list_area = true;
         }
     }
 
@@ -1313,6 +1382,8 @@ impl App {
         if self.settings.category_index < categories.len().saturating_sub(1) {
             self.settings.category_index += 1;
             self.settings.list_state.select(Some(self.settings.category_index));
+            // Reset theme list area when changing categories
+            self.settings.in_theme_list_area = true;
         }
     }
 
@@ -1341,7 +1412,7 @@ impl App {
         let options = self.get_sidebar_width_options();
         if let Some(&width) = options.get(self.settings.sidebar_width_index) {
             self.config.sidebar_width_percent = width;
-            self.config.save()?;
+            self.save_config()?;
             self.set_status_message(format!("Sidebar width set to {}%", width));
         }
         Ok(())
@@ -1380,15 +1451,7 @@ impl App {
             
             self.ui.list_view_mode = new_mode;
             self.config.list_view_mode = mode_str.to_string();
-            // Determine profile based on database path (same logic as get_config_file_path)
-            let db_path = self.config.get_database_path();
-            let db_path_str = db_path.to_string_lossy();
-            let profile = if db_path_str.contains("tnj-dev") {
-                crate::Profile::Dev
-            } else {
-                crate::Profile::Prod
-            };
-            self.config.save_with_profile(profile)?;
+            self.save_config()?;
             
             // Adjust selection to ensure it's valid for the new mode
             self.adjust_selected_index();
@@ -2067,15 +2130,7 @@ impl App {
     
     /// Get config file path
     pub fn get_config_file_path(&self) -> String {
-        // Determine profile based on database path
-        let db_path = self.config.get_database_path();
-        let db_path_str = db_path.to_string_lossy();
-        let profile = if db_path_str.contains("tnj-dev") {
-            crate::Profile::Dev
-        } else {
-            crate::Profile::Prod
-        };
-        
+        let profile = self.get_profile();
         match Config::get_config_path(profile) {
             Ok(path) => path.to_string_lossy().to_string(),
             Err(_) => "Unknown".to_string(),
@@ -2085,6 +2140,23 @@ impl App {
     /// Get database file path
     pub fn get_database_file_path(&self) -> String {
         self.config.get_database_path().to_string_lossy().to_string()
+    }
+    
+    /// Determine the profile based on database path
+    fn get_profile(&self) -> crate::Profile {
+        let db_path = self.config.get_database_path();
+        let db_path_str = db_path.to_string_lossy();
+        if db_path_str.contains("tnj-dev") {
+            crate::Profile::Dev
+        } else {
+            crate::Profile::Prod
+        }
+    }
+    
+    /// Save config using the correct profile (determined from database path)
+    pub fn save_config(&mut self) -> Result<(), crate::config::ConfigError> {
+        let profile = self.get_profile();
+        self.config.save_with_profile(profile)
     }
 
     /// Get available themes
@@ -2111,8 +2183,10 @@ impl App {
 
     /// Select and apply a theme
     pub fn select_theme(&mut self, theme_name: &str) -> Result<(), crate::config::ConfigError> {
+        // Clear color overrides when selecting a new theme
+        self.config.clear_color_overrides();
         self.config.set_theme(theme_name)?;
-        self.config.save()?;
+        self.save_config()?; // Use save_config to save with correct profile
         
         // Update theme index to match current theme
         let themes = self.get_available_themes();
@@ -2301,6 +2375,10 @@ impl App {
 
     /// Initialize settings state when entering Settings mode
     pub fn init_settings_state(&mut self) {
+        // Start with category list active
+        self.settings.current_field = SettingsField::CategoryList;
+        self.settings.in_theme_list_area = true;
+        
         // Set theme index to current theme
         let themes = self.get_available_themes();
         if let Some(index) = themes.iter().position(|t| t == &self.config.current_theme) {
@@ -2550,6 +2628,312 @@ impl App {
         } else {
             None
         }
+    }
+
+    // Color editor navigation methods
+    pub fn move_color_field_up(&mut self) {
+        if self.settings.color_field_index > 0 {
+            self.settings.color_field_index -= 1;
+        } else {
+            // Wrap to last field
+            self.settings.color_field_index = 4;
+        }
+    }
+
+    pub fn move_color_field_down(&mut self) {
+        if self.settings.color_field_index < 4 {
+            self.settings.color_field_index += 1;
+        } else {
+            // Wrap to first field
+            self.settings.color_field_index = 0;
+        }
+    }
+    
+    /// Check if we're currently in the theme list area (for Theme Settings)
+    pub fn is_in_theme_list_area(&self) -> bool {
+        self.settings.in_theme_list_area
+    }
+
+    pub fn move_color_field(&mut self, forward: bool) {
+        if forward {
+            self.move_color_field_down();
+        } else {
+            self.move_color_field_up();
+        }
+    }
+
+    // Color cycling methods
+    /// Find the index of a color string in NAMED_COLORS
+    /// Returns the index if found, or NAMED_COLORS.len() if not found (custom color)
+    fn find_color_index_in_named_colors(color_str: &str) -> usize {
+        use crate::tui::widgets::color::NAMED_COLORS;
+        let normalized = color_str.trim().to_lowercase();
+        NAMED_COLORS.iter()
+            .position(|&name| name == normalized)
+            .unwrap_or(NAMED_COLORS.len()) // Use len() as sentinel for custom colors
+    }
+
+    /// Initialize color_cycle_indices based on current color values
+    pub fn initialize_color_cycle_indices(&mut self) {
+        let theme = self.config.get_color_overrides()
+            .cloned()
+            .unwrap_or_else(|| self.config.get_active_theme());
+        
+        // Calculate highlight_fg if needed (before moving theme values)
+        let highlight_fg_value = if theme.highlight_fg.is_empty() {
+            use crate::tui::widgets::color::{parse_color, get_contrast_text_color, format_color_for_display};
+            let highlight_bg_color = parse_color(&theme.highlight_bg);
+            let calculated = get_contrast_text_color(highlight_bg_color);
+            format_color_for_display(&calculated)
+        } else {
+            theme.highlight_fg.clone()
+        };
+        
+        // Get current color values for each field
+        let colors = [
+            theme.fg,
+            theme.bg,
+            theme.highlight_bg,
+            highlight_fg_value,
+            theme.tab_bg,
+        ];
+        
+        // Initialize each index based on the current color value
+        for (idx, color) in colors.iter().enumerate() {
+            self.settings.color_cycle_indices[idx] = Self::find_color_index_in_named_colors(color);
+        }
+    }
+
+    pub fn cycle_color_left(&mut self) {
+        use crate::tui::widgets::color::NAMED_COLORS;
+        let field_idx = self.settings.color_field_index;
+        let cycle_idx = &mut self.settings.color_cycle_indices[field_idx];
+        
+        // If this is a custom color (sentinel value), don't allow cycling to preserve the custom color
+        if *cycle_idx >= NAMED_COLORS.len() {
+            return;
+        }
+        
+        if *cycle_idx > 0 {
+            *cycle_idx -= 1;
+        } else {
+            // Wrap to last color
+            *cycle_idx = NAMED_COLORS.len().saturating_sub(1);
+        }
+        
+        self.update_color_from_cycle();
+    }
+
+    pub fn cycle_color_right(&mut self) {
+        use crate::tui::widgets::color::NAMED_COLORS;
+        let field_idx = self.settings.color_field_index;
+        let cycle_idx = &mut self.settings.color_cycle_indices[field_idx];
+        
+        // If this is a custom color (sentinel value), don't allow cycling to preserve the custom color
+        if *cycle_idx >= NAMED_COLORS.len() {
+            return;
+        }
+        
+        if *cycle_idx < NAMED_COLORS.len().saturating_sub(1) {
+            *cycle_idx += 1;
+        } else {
+            // Wrap to first color
+            *cycle_idx = 0;
+        }
+        
+        self.update_color_from_cycle();
+    }
+
+    fn update_color_from_cycle(&mut self) {
+        use crate::tui::widgets::color::NAMED_COLORS;
+        let field_idx = self.settings.color_field_index;
+        let cycle_idx = self.settings.color_cycle_indices[field_idx];
+        
+        if cycle_idx >= NAMED_COLORS.len() {
+            return;
+        }
+        
+        let color_name = NAMED_COLORS[cycle_idx];
+        
+        // Get or create color overrides
+        let mut theme = self.config.get_color_overrides()
+            .cloned()
+            .unwrap_or_else(|| self.config.get_active_theme());
+        
+        // Update the appropriate field
+        match field_idx {
+            0 => theme.fg = color_name.to_string(),
+            1 => theme.bg = color_name.to_string(),
+            2 => theme.highlight_bg = color_name.to_string(),
+            3 => theme.highlight_fg = color_name.to_string(),
+            4 => theme.tab_bg = color_name.to_string(),
+            _ => return,
+        }
+        
+        // Set overrides and save
+        self.config.set_color_overrides(theme);
+        if let Err(e) = self.save_config() {
+            eprintln!("Failed to save color override: {}", e);
+        }
+    }
+
+    // Input mode methods
+    pub fn enter_color_input_mode(&mut self) {
+        self.settings.color_input_mode = true;
+        self.settings.color_input_field_index = Some(self.settings.color_field_index);
+        self.settings.color_input_error = None;
+        
+        // Initialize editor with current color value
+        let current_value = self.get_current_color_field_value();
+        self.settings.color_input_editor = Editor::from_string(current_value);
+    }
+
+    pub fn exit_color_input_mode(&mut self) {
+        self.settings.color_input_mode = false;
+        self.settings.color_input_field_index = None;
+        self.settings.color_input_error = None;
+    }
+
+    pub fn get_color_input_editor(&mut self) -> Option<&mut Editor> {
+        if self.settings.color_input_mode && 
+           self.settings.color_input_field_index == Some(self.settings.color_field_index) {
+            Some(&mut self.settings.color_input_editor)
+        } else {
+            None
+        }
+    }
+
+    pub fn validate_and_apply_color_input(&mut self) -> Result<(), String> {
+        use crate::tui::widgets::color::parse_color;
+        
+        // Get input text
+        let input_text = if self.settings.color_input_editor.lines.is_empty() {
+            String::new()
+        } else {
+            self.settings.color_input_editor.lines[0].clone()
+        };
+        
+        // Try to parse the color
+        let _color = parse_color(&input_text);
+        // Note: parse_color always returns a valid color (fallback to White),
+        // so we need to check if the input was actually valid
+        // For now, we'll accept any input that parse_color can handle
+        
+        // Get or create color overrides
+        let mut theme = self.config.get_color_overrides()
+            .cloned()
+            .unwrap_or_else(|| self.config.get_active_theme());
+        
+        // Update the appropriate field
+        let field_idx = self.settings.color_field_index;
+        match field_idx {
+            0 => theme.fg = input_text.clone(),
+            1 => theme.bg = input_text.clone(),
+            2 => theme.highlight_bg = input_text.clone(),
+            3 => theme.highlight_fg = input_text.clone(),
+            4 => theme.tab_bg = input_text.clone(),
+            _ => return Err("Invalid field index".to_string()),
+        }
+        
+        // Set overrides and save
+        self.config.set_color_overrides(theme);
+        if let Err(e) = self.save_config() {
+            return Err(format!("Failed to save: {}", e));
+        }
+        
+        // Update the cycle index for this field to match the new color
+        // If the color is a named color, set the index to its position
+        // If it's a custom color (hex/RGB), set to NAMED_COLORS.len() to prevent cycling from overwriting it
+        let field_idx = self.settings.color_field_index;
+        self.settings.color_cycle_indices[field_idx] = Self::find_color_index_in_named_colors(&input_text);
+        
+        // Clear error and exit input mode
+        self.settings.color_input_error = None;
+        self.exit_color_input_mode();
+        
+        Ok(())
+    }
+
+    // Action methods
+    pub fn reset_color_overrides(&mut self) -> Result<(), ConfigError> {
+        self.config.clear_color_overrides();
+        self.save_config()?;
+        // Reinitialize cycle indices to match the base theme colors
+        self.initialize_color_cycle_indices();
+        let theme_name = &self.config.current_theme;
+        self.set_status_message(format!("Colors reset to theme: {}", theme_name));
+        Ok(())
+    }
+
+    pub fn save_theme_from_overrides(&mut self, name: &str) -> Result<(), ConfigError> {
+        self.config.save_theme_from_overrides(name)?;
+        // Clear color overrides so the newly saved theme is immediately active
+        // This matches the behavior of select_theme() for consistency
+        self.config.clear_color_overrides();
+        // Automatically select the newly saved theme
+        self.config.set_theme(name)?;
+        self.save_config()?;
+        // Update theme index to match the newly selected theme
+        let themes = self.get_available_themes();
+        if let Some(index) = themes.iter().position(|t| t == name) {
+            self.settings.theme_index = index;
+            self.settings.theme_list_state.select(Some(index));
+        }
+        self.set_status_message(format!("Theme saved and selected: {}", name));
+        Ok(())
+    }
+
+    pub fn enter_save_theme_name_mode(&mut self) {
+        self.settings.color_save_theme_name_editor = Some(Editor::new());
+    }
+
+    pub fn exit_save_theme_name_mode(&mut self) {
+        self.settings.color_save_theme_name_editor = None;
+    }
+
+    pub fn get_save_theme_name_editor(&mut self) -> Option<&mut Editor> {
+        self.settings.color_save_theme_name_editor.as_mut()
+    }
+
+    // Helper methods
+    pub fn get_current_color_field_value(&self) -> String {
+        let theme = self.config.get_color_overrides()
+            .cloned()
+            .unwrap_or_else(|| self.config.get_active_theme());
+        
+        match self.settings.color_field_index {
+            0 => theme.fg,
+            1 => theme.bg,
+            2 => theme.highlight_bg,
+            3 => {
+                // For highlight_fg, return the value or calculate if empty
+                if theme.highlight_fg.is_empty() {
+                    use crate::tui::widgets::color::{parse_color, get_contrast_text_color, format_color_for_display};
+                    let highlight_bg_color = parse_color(&theme.highlight_bg);
+                    let calculated = get_contrast_text_color(highlight_bg_color);
+                    format_color_for_display(&calculated)
+                } else {
+                    theme.highlight_fg
+                }
+            },
+            4 => theme.tab_bg,
+            _ => String::new(),
+        }
+    }
+
+    pub fn get_color_field_name(&self, index: usize) -> &str {
+        match index {
+            0 => "Foreground",
+            1 => "Background",
+            2 => "Highlight",
+            3 => "Highlight FG",
+            4 => "Tab BG",
+            _ => "Unknown",
+        }
+    }
+
+    pub fn get_color_preview_theme(&self) -> Theme {
+        self.config.get_active_theme()
     }
 }
 

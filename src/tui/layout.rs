@@ -22,13 +22,7 @@ impl Layout {
         sidebar_width_percent: u16,
         sidebar_collapsed: bool,
     ) -> Self {
-        // Ensure minimum terminal size (accounting for outer border)
-        let min_width_with_border = Self::MIN_WIDTH + 2; // +2 for left/right borders
-        let min_height_with_border = Self::MIN_HEIGHT + 2; // +2 for top/bottom borders
-        let width = size.width.max(min_width_with_border);
-        let height = size.height.max(min_height_with_border);
-        let size = Rect::new(size.x, size.y, width, height);
-
+        // Use the actual terminal size - minimum size check happens before entering TUI
         // Calculate inner area (accounting for outer border: 1 char on each side)
         let inner_area = Rect::new(
             size.x + 1,
@@ -54,13 +48,44 @@ impl Layout {
 
         // Split vertically: tabs (1 line), content area, filters (3 lines for borders + content), status (1 line)
         // Following ratatui example: tabs render in 1 line, content has borders that connect visually
+        // For small terminals, make filters flexible to prevent clipping
+        // Fixed elements: tabs (1) + status (1) = 2 lines
+        // Filters ideally need 3 lines, but can shrink to 1 for very small terminals
+        // Content gets whatever is left (minimum 1 line)
+        let tabs_height = 1;
+        let status_height = 1;
+        let ideal_filters_height = 3;
+        let min_filters_height = 1;
+        
+        // Calculate available height after fixed elements
+        let available_after_fixed = inner_area.height.saturating_sub(tabs_height + status_height);
+        
+        // Determine filters height and content height based on available space
+        // Critical: content_height + filters_height must equal available_after_fixed exactly
+        // Content must get at least 1 line
+        let (filters_height, content_height) = if available_after_fixed >= ideal_filters_height + 1 {
+            // Enough space: use ideal height for filters, rest for content
+            (ideal_filters_height, available_after_fixed - ideal_filters_height)
+        } else if available_after_fixed >= min_filters_height + 1 {
+            // Limited space: use minimum for filters, rest for content
+            (min_filters_height, available_after_fixed - min_filters_height)
+        } else {
+            // Very limited space: prioritize content (needs at least 1 line)
+            // Filters get whatever is left (could be 0 if available_after_fixed = 1)
+            // If available_after_fixed = 1: filters = 0, content = 1
+            // If available_after_fixed = 2: filters = 1, content = 1
+            let content = 1;
+            let filters = available_after_fixed.saturating_sub(content);
+            (filters, content)
+        };
+        
         let vertical = RatLayout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(1), // Tabs
-                Constraint::Min(1),    // Content (sidebar + main)
-                Constraint::Length(3), // Filters (needs borders + content)
-                Constraint::Length(1), // Status
+                Constraint::Length(tabs_height), // Tabs
+                Constraint::Length(content_height), // Content (explicit height to prevent overflow)
+                Constraint::Length(filters_height), // Filters (flexible based on available space)
+                Constraint::Length(status_height), // Status
             ])
             .split(inner_area);
 

@@ -1,8 +1,9 @@
-use ratatui::widgets::{Block, Borders, List, ListItem, StatefulWidget, Clear};
+use ratatui::widgets::{Block, Borders, List, ListItem, StatefulWidget, Clear, Paragraph};
 use ratatui::style::Style;
 use ratatui::Frame;
 use ratatui::layout::{Rect, Layout, Direction, Constraint, Alignment, Flex};
 use ratatui::widgets::ListState;
+use ratatui::text::{Line, Span};
 use crate::Config;
 use crate::tui::widgets::color::{parse_color, get_contrast_text_color};
 use crate::tui::App;
@@ -88,7 +89,11 @@ pub fn render_settings_view_modal(f: &mut Frame, area: Rect, app: &App) {
     let fg_color = parse_color(&active_theme.fg);
     let bg_color = parse_color(&active_theme.bg);
     let highlight_bg = parse_color(&active_theme.highlight_bg);
-    let highlight_fg = get_contrast_text_color(highlight_bg);
+    let highlight_fg = if active_theme.highlight_fg.is_empty() {
+        get_contrast_text_color(highlight_bg)
+    } else {
+        parse_color(&active_theme.highlight_fg)
+    };
     
     // Calculate popup area (70% width, 60% height, centered)
     let popup_area = popup_area(area, 70, 60);
@@ -130,7 +135,8 @@ pub fn render_settings_view_modal(f: &mut Frame, area: Rect, app: &App) {
     let categories = app.get_settings_categories();
     let mut categories_list_state = app.settings.list_state.clone();
     categories_list_state.select(Some(app.settings.category_index));
-    render_settings_list(f, sidebar_area, &categories, &mut categories_list_state, &app.config);
+    let is_category_list_active = app.settings.current_field == crate::tui::app::SettingsField::CategoryList;
+    render_settings_list(f, sidebar_area, &categories, &mut categories_list_state, &app.config, is_category_list_active);
     
     // Render main content based on selected category
     let selected_category = categories.get(app.settings.category_index);
@@ -171,16 +177,23 @@ fn render_theme_settings(
     // Calculate height needed for Theme box
     let theme_box_height = (themes.len() + 2).max(5).min(main_area.height as usize) as u16;
     
-    // Split main area vertically - Theme box takes only what it needs
+    // Calculate height needed for color editor (5 fields + preview + actions + borders)
+    // Ensure we don't exceed available space after theme box
+    let available_height = main_area.height.saturating_sub(theme_box_height);
+    let color_editor_height = (5 + 4 + 2 + 2).min(available_height as usize).max(0) as u16;
+    
+    // Split main area vertically - Theme box and color editor
     let theme_areas = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(theme_box_height), // Theme box
+            Constraint::Length(color_editor_height), // Color editor
             Constraint::Min(0), // Remaining space
         ])
         .split(main_area);
     
     let theme_area = theme_areas[0];
+    let color_editor_area = theme_areas[1];
     
     // Create list items with radio button style
     let items: Vec<ListItem> = themes.iter().map(|theme_name| {
@@ -203,6 +216,9 @@ fn render_theme_settings(
     let mut list_state = app.settings.theme_list_state.clone();
     list_state.select(Some(app.settings.theme_index));
     StatefulWidget::render(list, theme_area, f.buffer_mut(), &mut list_state);
+    
+    // Render color editor
+    render_color_editor(f, color_editor_area, app, fg_color, bg_color, highlight_fg, highlight_bg);
 }
 
 /// Render appearance settings content
@@ -340,6 +356,279 @@ fn render_system_settings(
         .wrap(ratatui::widgets::Wrap { trim: true });
     
     f.render_widget(paragraph, main_area);
+}
+
+/// Render color editor
+fn render_color_editor(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    fg_color: ratatui::style::Color,
+    bg_color: ratatui::style::Color,
+    highlight_fg: ratatui::style::Color,
+    highlight_bg: ratatui::style::Color,
+) {
+    if area.width < 2 || area.height < 2 {
+        return;
+    }
+
+    // Wrap color editor in a bordered box with title
+    let color_editor_block = Block::default()
+        .borders(Borders::ALL)
+        .title("Color Options");
+    
+    // Calculate inner area (accounting for borders)
+    let inner_area = Rect::new(
+        area.x + 1,
+        area.y + 1,
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(2),
+    );
+    
+    // Render the block border
+    f.render_widget(color_editor_block, area);
+
+    // Split inner area: color fields (left) and preview + actions (right)
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(30), // Color fields
+            Constraint::Length(20), // Preview + actions
+        ])
+        .split(inner_area);
+
+    let fields_area = horizontal[0];
+    let preview_area = horizontal[1];
+
+    // Render color fields
+    let fields_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Foreground
+            Constraint::Length(1), // Background
+            Constraint::Length(1), // Highlight
+            Constraint::Length(1), // Highlight FG
+            Constraint::Length(1), // Tab BG
+            Constraint::Min(0), // Error message space
+        ])
+        .split(fields_area);
+
+    for (idx, field_area) in fields_layout.iter().take(5).enumerate() {
+        render_color_field(f, *field_area, app, idx, fg_color, bg_color, highlight_fg, highlight_bg);
+    }
+
+    // Render error message if present
+    if let Some(ref error) = app.settings.color_input_error {
+        if fields_layout.len() > 5 {
+            let error_area = fields_layout[5];
+            let error_para = Paragraph::new(error.as_str())
+                .style(Style::default().fg(ratatui::style::Color::Red));
+            f.render_widget(error_para, error_area);
+        }
+    }
+
+    // Render preview and actions
+    let preview_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(4), // Preview
+            Constraint::Min(0), // Actions
+        ])
+        .split(preview_area);
+
+    render_color_preview(f, preview_layout[0], app, fg_color, bg_color, highlight_fg, highlight_bg);
+    
+    // Render save theme name input if active
+    if app.settings.color_save_theme_name_editor.is_some() {
+        // Show input field for theme name
+        let name_text = if let Some(ref editor) = app.settings.color_save_theme_name_editor {
+            if editor.lines.is_empty() {
+                "".to_string()
+            } else {
+                editor.lines[0].clone()
+            }
+        } else {
+            "".to_string()
+        };
+        
+        let name_line = Line::from(vec![
+            Span::styled("Theme name: ", Style::default().fg(fg_color)),
+            Span::styled(name_text.as_str(), Style::default().fg(highlight_fg).bg(highlight_bg)),
+        ]);
+        
+        let name_para = Paragraph::new(name_line);
+        f.render_widget(name_para, preview_layout[1]);
+        
+        // Render cursor
+        if let Some(ref editor) = app.settings.color_save_theme_name_editor {
+            let prefix = "Theme name: ";
+            let cursor_col = editor.cursor_col.min(name_text.chars().count());
+            let prefix_len = prefix.chars().count();
+            let total_cursor_col = prefix_len + cursor_col;
+            let max_col = (preview_layout[1].width.saturating_sub(1)) as usize;
+            let visible_cursor_col = total_cursor_col.min(max_col);
+            
+            let x = preview_layout[1].x + (visible_cursor_col as u16);
+            let y = preview_layout[1].y;
+            
+            if x < preview_layout[1].x + preview_layout[1].width && y < preview_layout[1].y + preview_layout[1].height {
+                f.set_cursor_position((x, y));
+            }
+        }
+    } else {
+        render_color_actions(f, preview_layout[1], app, fg_color, bg_color, highlight_fg, highlight_bg);
+    }
+}
+
+/// Render a single color field
+fn render_color_field(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    field_index: usize,
+    fg_color: ratatui::style::Color,
+    bg_color: ratatui::style::Color,
+    highlight_fg: ratatui::style::Color,
+    highlight_bg: ratatui::style::Color,
+) {
+    let theme = app.get_color_preview_theme();
+    let field_name = app.get_color_field_name(field_index);
+    let is_active = app.settings.color_field_index == field_index;
+    let is_input_mode = app.settings.color_input_mode && 
+                        app.settings.color_input_field_index == Some(field_index);
+    
+    let color_value = match field_index {
+        0 => &theme.fg,
+        1 => &theme.bg,
+        2 => &theme.highlight_bg,
+        3 => {
+            // For highlight_fg, use the value or calculate if empty
+            if theme.highlight_fg.is_empty() {
+                // Calculate from highlight_bg
+                use crate::tui::widgets::color::{parse_color, get_contrast_text_color, format_color_for_display};
+                let highlight_bg_color = parse_color(&theme.highlight_bg);
+                let calculated = get_contrast_text_color(highlight_bg_color);
+                return render_color_field_value(f, area, field_name, &format_color_for_display(&calculated), 
+                    is_active, is_input_mode, fg_color, bg_color, highlight_fg, highlight_bg);
+            } else {
+                &theme.highlight_fg
+            }
+        },
+        4 => &theme.tab_bg,
+        _ => return,
+    };
+    
+    render_color_field_value(f, area, field_name, color_value, is_active, is_input_mode, 
+        fg_color, bg_color, highlight_fg, highlight_bg);
+}
+
+/// Helper function to render a color field value
+fn render_color_field_value(
+    f: &mut Frame,
+    area: Rect,
+    field_name: &str,
+    color_value: &str,
+    is_active: bool,
+    is_input_mode: bool,
+    fg_color: ratatui::style::Color,
+    bg_color: ratatui::style::Color,
+    highlight_fg: ratatui::style::Color,
+    highlight_bg: ratatui::style::Color,
+) {
+    let color = parse_color(color_value);
+
+    // Build display text
+    let mut display_value = format!("[{}]", color_value);
+    if is_input_mode {
+        display_value.push_str(" <input>");
+    }
+
+    // Create text with color swatch
+    let swatch = "█";
+    let text = if is_active {
+        Line::from(vec![
+            Span::styled(
+                format!("{}: {} {}", field_name, display_value, swatch),
+                Style::default()
+                    .fg(highlight_fg)
+                    .bg(highlight_bg)
+            ),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(
+                format!("{}: {} ", field_name, display_value),
+                Style::default().fg(fg_color).bg(bg_color)
+            ),
+            Span::styled(
+                swatch,
+                Style::default().fg(color).bg(bg_color)
+            ),
+        ])
+    };
+
+    let para = Paragraph::new(text);
+    f.render_widget(para, area);
+}
+
+/// Render color preview box
+fn render_color_preview(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    _fg_color: ratatui::style::Color,
+    _bg_color: ratatui::style::Color,
+    _highlight_fg: ratatui::style::Color,
+    _highlight_bg: ratatui::style::Color,
+) {
+    let theme = app.get_color_preview_theme();
+    let fg = parse_color(&theme.fg);
+    let bg = parse_color(&theme.bg);
+    let highlight = parse_color(&theme.highlight_bg);
+    let tab_bg = parse_color(&theme.tab_bg);
+
+    // Get highlight_fg from theme or calculate
+    let highlight_fg_color = if theme.highlight_fg.is_empty() {
+        use crate::tui::widgets::color::{get_contrast_text_color};
+        get_contrast_text_color(highlight)
+    } else {
+        parse_color(&theme.highlight_fg)
+    };
+    
+    let preview_text = vec![
+        Line::from(Span::styled("Sample Text", Style::default().fg(fg).bg(bg))),
+        Line::from(Span::styled("Highlighted", Style::default().fg(highlight_fg_color).bg(highlight))),
+        Line::from(Span::styled("Tab", Style::default().fg(ratatui::style::Color::White).bg(tab_bg))),
+    ];
+
+    let para = Paragraph::new(preview_text)
+        .block(Block::default().borders(Borders::ALL).title("Preview"));
+    f.render_widget(para, area);
+}
+
+/// Render color action buttons
+fn render_color_actions(
+    f: &mut Frame,
+    area: Rect,
+    _app: &App,
+    fg_color: ratatui::style::Color,
+    bg_color: ratatui::style::Color,
+    _highlight_fg: ratatui::style::Color,
+    _highlight_bg: ratatui::style::Color,
+) {
+    let actions = vec![
+        Line::from(Span::styled(
+            "[Reset to Theme]",
+            Style::default().fg(fg_color).bg(bg_color)
+        )),
+        Line::from(Span::styled(
+            "[Save as Theme]",
+            Style::default().fg(fg_color).bg(bg_color)
+        )),
+    ];
+
+    let para = Paragraph::new(actions);
+    f.render_widget(para, area);
 }
 
 /// Helper function to create a centered rect using up certain percentage of the available rect

@@ -2,12 +2,11 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.1.2-blue.svg)
-![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)
 ![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey.svg)
 [![Crates.io](https://img.shields.io/crates/v/tnj-tui.svg)](https://crates.io/crates/tnj-tui)
 [![GitHub release](https://img.shields.io/github/release/mikenorusis/tnj.svg)](https://github.com/mikenorusis/tnj/releases/latest)
+![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)
 
 A lightweight, terminal-based application for managing tasks, notes, and journal entries. Built with Rust and featuring an intuitive TUI (Text User Interface), TNJ helps you stay organized without leaving your terminal.
 

@@ -12,7 +12,11 @@ pub fn render_confirm_delete(f: &mut Frame, area: Rect, item: &SelectedItem, sel
     let fg_color = parse_color(&active_theme.fg);
     let bg_color = parse_color(&active_theme.bg);
     let highlight_bg = parse_color(&active_theme.highlight_bg);
-    let highlight_fg = get_contrast_text_color(highlight_bg);
+    let highlight_fg = if active_theme.highlight_fg.is_empty() {
+        get_contrast_text_color(highlight_bg)
+    } else {
+        parse_color(&active_theme.highlight_fg)
+    };
     
     // Calculate popup area (50% width, 35% height, centered)
     let popup_area = popup_area(area, 50, 35);

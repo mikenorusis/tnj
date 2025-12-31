@@ -6,6 +6,9 @@ use thiserror::Error;
 
 use crate::utils;
 
+/// Current configuration version
+pub const CURRENT_CONFIG_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default = "default_sidebar_width")]
@@ -20,6 +23,10 @@ pub struct Config {
     pub themes: HashMap<String, Theme>,
     #[serde(default = "default_list_view_mode")]
     pub list_view_mode: String,
+    #[serde(default = "default_config_version")]
+    pub config_version: Option<u32>,
+    #[serde(default)]
+    pub color_overrides: Option<Theme>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +91,8 @@ pub struct Theme {
     pub bg: String,
     #[serde(default = "default_highlight_bg")]
     pub highlight_bg: String,
+    #[serde(default = "default_highlight_fg")]
+    pub highlight_fg: String,
     #[serde(default = "default_tab_bg")]
     pub tab_bg: String,
 }
@@ -97,6 +106,7 @@ impl Default for Config {
             fg: "cyan".to_string(),
             bg: "black".to_string(),
             highlight_bg: "blue".to_string(),
+            highlight_fg: "white".to_string(),
             tab_bg: "gray".to_string(),
         });
         
@@ -107,6 +117,8 @@ impl Default for Config {
             current_theme: default_current_theme(),
             themes,
             list_view_mode: default_list_view_mode(),
+            config_version: Some(CURRENT_CONFIG_VERSION),
+            color_overrides: None,
         }
     }
 }
@@ -149,6 +161,7 @@ impl Default for Theme {
             fg: default_fg(),
             bg: default_bg(),
             highlight_bg: default_highlight_bg(),
+            highlight_fg: default_highlight_fg(),
             tab_bg: default_tab_bg(),
         }
     }
@@ -163,6 +176,7 @@ impl Theme {
             fg: "white".to_string(),
             bg: "black".to_string(),
             highlight_bg: "blue".to_string(),
+            highlight_fg: "white".to_string(),
             tab_bg: "gray".to_string(),
         });
         
@@ -170,6 +184,7 @@ impl Theme {
             fg: "white".to_string(),
             bg: "black".to_string(),
             highlight_bg: "cyan".to_string(),
+            highlight_fg: "black".to_string(),
             tab_bg: "gray".to_string(),
         });
         
@@ -177,6 +192,7 @@ impl Theme {
             fg: "black".to_string(),
             bg: "white".to_string(),
             highlight_bg: "blue".to_string(),
+            highlight_fg: "white".to_string(),
             tab_bg: "gray".to_string(),
         });
         
@@ -184,6 +200,7 @@ impl Theme {
             fg: "green".to_string(),
             bg: "black".to_string(),
             highlight_bg: "yellow".to_string(),
+            highlight_fg: "black".to_string(),
             tab_bg: "gray".to_string(),
         });
         
@@ -191,6 +208,7 @@ impl Theme {
             fg: "white".to_string(),
             bg: "black".to_string(),
             highlight_bg: "white".to_string(),
+            highlight_fg: "black".to_string(),
             tab_bg: "gray".to_string(),
         });
         
@@ -328,12 +346,20 @@ fn default_highlight_bg() -> String {
     "blue".to_string()
 }
 
+fn default_highlight_fg() -> String {
+    "white".to_string()
+}
+
 fn default_tab_bg() -> String {
     "gray".to_string()
 }
 
 fn default_list_view_mode() -> String {
     "Simple".to_string()
+}
+
+fn default_config_version() -> Option<u32> {
+    Some(CURRENT_CONFIG_VERSION)
 }
 
 #[derive(Debug, Error)]
@@ -348,6 +374,8 @@ pub enum ConfigError {
     WriteError(String),
     #[error("Theme not found: {0}")]
     ThemeNotFound(String),
+    #[error("Theme name already exists: {0}")]
+    ThemeNameExists(String),
 }
 
 impl Config {
@@ -386,7 +414,10 @@ impl Config {
     }
 
     /// Save configuration to file
-    pub fn save_with_profile(&self, profile: utils::Profile) -> Result<(), ConfigError> {
+    pub fn save_with_profile(&mut self, profile: utils::Profile) -> Result<(), ConfigError> {
+        // Ensure config version is set before saving
+        self.config_version = Some(CURRENT_CONFIG_VERSION);
+        
         let config_path = Self::get_config_path(profile)?;
 
         // Create parent directory if it doesn't exist
@@ -406,7 +437,7 @@ impl Config {
 
     /// Save configuration to file, using production profile
     /// Use save_with_profile() to specify a different profile
-    pub fn save(&self) -> Result<(), ConfigError> {
+    pub fn save(&mut self) -> Result<(), ConfigError> {
         self.save_with_profile(utils::Profile::Prod)
     }
 
@@ -446,21 +477,32 @@ impl Config {
     }
 
     /// Get the currently active theme
+    /// If highlight_fg is not set (empty string), it will be calculated from highlight_bg
     pub fn get_active_theme(&self) -> Theme {
-        // First check user-defined themes
-        if let Some(theme) = self.themes.get(&self.current_theme) {
-            return theme.clone();
+        use crate::tui::widgets::color::{parse_color, get_contrast_text_color, format_color_for_display};
+        
+        // First check color overrides (user customizations)
+        let mut theme = if let Some(ref overrides) = self.color_overrides {
+            overrides.clone()
+        } else if let Some(theme) = self.themes.get(&self.current_theme) {
+            theme.clone()
+        } else if let Some(theme) = Theme::get_preset_themes().get(&self.current_theme) {
+            theme.clone()
+        } else {
+            // Final fallback: default theme
+            Theme::get_preset_themes().get("default")
+                .cloned()
+                .unwrap_or_else(|| Theme::default())
+        };
+        
+        // If highlight_fg is empty or not set, calculate it from highlight_bg
+        if theme.highlight_fg.is_empty() {
+            let highlight_bg_color = parse_color(&theme.highlight_bg);
+            let calculated_fg = get_contrast_text_color(highlight_bg_color);
+            theme.highlight_fg = format_color_for_display(&calculated_fg);
         }
         
-        // Fall back to preset themes
-        if let Some(theme) = Theme::get_preset_themes().get(&self.current_theme) {
-            return theme.clone();
-        }
-        
-        // Final fallback: default theme
-        Theme::get_preset_themes().get("default")
-            .cloned()
-            .unwrap_or_else(|| Theme::default())
+        theme
     }
 
     /// Set the active theme by name
@@ -489,6 +531,37 @@ impl Config {
         // Sort for consistent display
         themes.sort();
         themes
+    }
+
+    /// Clear color overrides, reverting to base theme
+    pub fn clear_color_overrides(&mut self) {
+        self.color_overrides = None;
+    }
+
+    /// Set color overrides
+    pub fn set_color_overrides(&mut self, theme: Theme) {
+        self.color_overrides = Some(theme);
+    }
+
+    /// Get current color overrides
+    pub fn get_color_overrides(&self) -> Option<&Theme> {
+        self.color_overrides.as_ref()
+    }
+
+    /// Save current color overrides as a new theme, or update existing custom theme
+    pub fn save_theme_from_overrides(&mut self, name: &str) -> Result<(), ConfigError> {
+        // Check if theme name is a preset theme (cannot overwrite presets)
+        if Theme::get_preset_themes().contains_key(name) {
+            return Err(ConfigError::ThemeNameExists(name.to_string()));
+        }
+
+        // Get current overrides or base theme
+        let theme = self.get_active_theme();
+        
+        // Save or update user-defined theme (overwrites if it exists)
+        self.themes.insert(name.to_string(), theme);
+        
+        Ok(())
     }
 }
 

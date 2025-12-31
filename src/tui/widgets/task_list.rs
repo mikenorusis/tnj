@@ -17,7 +17,11 @@ pub fn render_task_list(f: &mut Frame, area: Rect, tasks: &[Task], total_count: 
     
     let active_theme = config.get_active_theme();
     let highlight_bg = parse_color(&active_theme.highlight_bg);
-    let highlight_fg = get_contrast_text_color(highlight_bg);
+    let highlight_fg = if active_theme.highlight_fg.is_empty() {
+        get_contrast_text_color(highlight_bg)
+    } else {
+        parse_color(&active_theme.highlight_fg)
+    };
     
     let items: Vec<ListItem> = match view_mode {
         ListViewMode::Simple => {
