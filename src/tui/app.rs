@@ -192,6 +192,7 @@ pub struct UiState {
     pub markdown_help_example_scroll: usize,
     pub markdown_help_rendered_scroll: usize,
     pub list_view_mode: ListViewMode,
+    pub view_content_selected: bool,
 }
 
 impl Default for UiState {
@@ -207,6 +208,7 @@ impl Default for UiState {
             markdown_help_example_scroll: 0,
             markdown_help_rendered_scroll: 0,
             list_view_mode: ListViewMode::Simple,
+            view_content_selected: false,
         }
     }
 }
@@ -426,6 +428,7 @@ impl App {
                 markdown_help_example_scroll: 0,
                 markdown_help_rendered_scroll: 0,
                 list_view_mode,
+                view_content_selected: false,
             },
             filter: FilterState {
                 tags: None,
