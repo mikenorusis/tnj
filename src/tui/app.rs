@@ -387,7 +387,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(config: Config, database: Database) -> Result<Self, DatabaseError> {
+    pub fn new(mut config: Config, database: Database) -> Result<Self, DatabaseError> {
         // Load list_view_mode from config before moving config
         let list_view_mode = match config.list_view_mode.as_str() {
             "Simple" => ListViewMode::Simple,
@@ -410,6 +410,19 @@ impl App {
         } else {
             notebooks
         };
+        
+        // Load saved notebook ID from config and validate it exists
+        let saved_notebook_id = config.current_notebook_id.and_then(|id| {
+            // Validate that the notebook still exists
+            if notebooks.iter().any(|n| n.id == Some(id)) {
+                Some(id)
+            } else {
+                None // Notebook was deleted, ignore saved ID
+            }
+        });
+        
+        // Synchronize validated ID back to config to prevent stale data
+        config.current_notebook_id = saved_notebook_id;
         
         let mut app = Self {
             config,
@@ -459,7 +472,7 @@ impl App {
                 delete_modal_selection: 0,
             },
             notebooks: NotebookState {
-                current_notebook_id: None, // Start with "[None]" selected
+                current_notebook_id: saved_notebook_id, // Use saved notebook ID if valid, otherwise None
                 notebooks,
                 modal_state: None,
             },
@@ -2482,6 +2495,12 @@ impl App {
     /// Switch to a different notebook
     pub fn switch_notebook(&mut self, id: Option<i64>) -> Result<(), DatabaseError> {
         self.notebooks.current_notebook_id = id;
+        // Save to config
+        self.config.current_notebook_id = id;
+        if let Err(e) = self.save_config() {
+            // Log error but don't fail - this is a non-critical operation
+            eprintln!("Failed to save notebook selection: {}", e);
+        }
         // Reload data to filter by new notebook
         self.load_data()?;
         self.set_status_message(format!("Switched to notebook: {}", self.get_notebook_display_name(id)));
@@ -2545,13 +2564,20 @@ impl App {
     /// Delete a notebook
     /// Items that belonged to this notebook will be moved to "[None]"
     pub fn delete_notebook(&mut self, id: i64) -> Result<(), DatabaseError> {
-        // Check if this is the current notebook
-        if self.notebooks.current_notebook_id == Some(id) {
-            // Switch to "[None]" before deleting
-            self.notebooks.current_notebook_id = None;
-        }
-
+        // Delete from database first to ensure operation succeeds before modifying state
         self.database.delete_notebook(id)?;
+        
+        // Check if this was the current notebook and update state only after successful deletion
+        if self.notebooks.current_notebook_id == Some(id) {
+            // Switch to "[None]" after successful deletion
+            self.notebooks.current_notebook_id = None;
+            // Save to config
+            self.config.current_notebook_id = None;
+            if let Err(e) = self.save_config() {
+                // Log error but don't fail - this is a non-critical operation
+                eprintln!("Failed to save notebook selection: {}", e);
+            }
+        }
         
         // Remove from local list
         self.notebooks.notebooks.retain(|n| n.id != Some(id));

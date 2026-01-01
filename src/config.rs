@@ -27,6 +27,8 @@ pub struct Config {
     pub config_version: Option<u32>,
     #[serde(default)]
     pub color_overrides: Option<Theme>,
+    #[serde(default = "default_current_notebook_id")]
+    pub current_notebook_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +121,7 @@ impl Default for Config {
             list_view_mode: default_list_view_mode(),
             config_version: Some(CURRENT_CONFIG_VERSION),
             color_overrides: None,
+            current_notebook_id: default_current_notebook_id(),
         }
     }
 }
@@ -360,6 +363,10 @@ fn default_list_view_mode() -> String {
 
 fn default_config_version() -> Option<u32> {
     Some(CURRENT_CONFIG_VERSION)
+}
+
+fn default_current_notebook_id() -> Option<i64> {
+    None
 }
 
 #[derive(Debug, Error)]
