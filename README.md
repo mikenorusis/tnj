@@ -73,6 +73,7 @@ brew tap mikenorusis/homebrew-tnj
 brew install tnj
 
 # Update to latest version
+brew update
 brew upgrade tnj
 ```
 
