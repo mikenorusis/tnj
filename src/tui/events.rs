@@ -8,6 +8,7 @@ use std::io;
 use crate::tui::App;
 use crate::tui::error::TuiError;
 use crate::tui::widgets::editor::Editor;
+use crate::tui::widgets::item_view::get_content_string;
 use crate::utils::parse_key_binding;
 
 /// Guard that ensures terminal state is restored even on panic
@@ -866,6 +867,41 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
         return handle_filter_mode(app, key_event);
     }
 
+    // Handle view mode specific key bindings (Ctrl+A and Ctrl+C) before global bindings
+    // This needs to be early to prevent terminal from intercepting Ctrl+A
+    if app.ui.mode == crate::tui::app::Mode::View && app.ui.selected_item.is_some() {
+        // Check for select all (Ctrl+A or Alt+A on macOS) in view mode
+        if crate::utils::has_primary_modifier(key_event.modifiers) 
+            && (key_event.code == KeyCode::Char('a') || key_event.code == KeyCode::Char('A')) {
+            app.ui.view_content_selected = true;
+            app.set_status_message("All content selected".to_string());
+            return Ok(false);
+        }
+
+        // Check for copy (Ctrl+C or Alt+C on macOS) in view mode
+        if crate::utils::has_primary_modifier(key_event.modifiers) 
+            && (key_event.code == KeyCode::Char('c') || key_event.code == KeyCode::Char('C')) {
+            if let Some(ref item) = app.ui.selected_item {
+                let content = get_content_string(item);
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    if let Err(e) = clipboard.set_text(&content) {
+                        app.set_status_message(format!("Failed to copy to clipboard: {}", e));
+                    } else {
+                        app.set_status_message("Copied to clipboard".to_string());
+                        app.ui.view_content_selected = false; // Reset selection flag after copy
+                    }
+                } else {
+                    app.set_status_message("Failed to access clipboard".to_string());
+                }
+            }
+            return Ok(false);
+        }
+    }
+
+    // Handle global key bindings (work across all modes)
+    return handle_global_key_bindings(app, key_event);
+}
+
 fn handle_create_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError> {
     // Check for save binding (Ctrl+s or Alt+s on macOS)
     let save_binding = parse_key_binding(&app.config.key_bindings.save)
@@ -1695,10 +1731,6 @@ fn handle_filter_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiErr
         }
     }
     Ok(false)
-}
-
-    // Handle global key bindings (work across all modes)
-    return handle_global_key_bindings(app, key_event);
 }
 
 fn handle_global_key_bindings(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError> {

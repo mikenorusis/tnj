@@ -11,7 +11,7 @@ use termimad::minimad::Text as MinimadText;
 use std::cmp;
 
 /// Get content as a markdown-formatted string for an item
-fn get_content_string(item: &SelectedItem) -> String {
+pub fn get_content_string(item: &SelectedItem) -> String {
     match item {
         SelectedItem::Task(task) => {
             let mut content = format!("**Title:** {}\n", task.title);
