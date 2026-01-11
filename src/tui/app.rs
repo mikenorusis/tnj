@@ -296,6 +296,8 @@ impl Default for SettingsState {
 pub struct ModalState {
     pub delete_confirmation: Option<SelectedItem>,
     pub delete_modal_selection: usize,
+    pub unsaved_changes_modal: bool,
+    pub unsaved_changes_modal_selection: usize,
 }
 
 impl Default for ModalState {
@@ -303,6 +305,8 @@ impl Default for ModalState {
         Self {
             delete_confirmation: None,
             delete_modal_selection: 0,
+            unsaved_changes_modal: false,
+            unsaved_changes_modal_selection: 0,
         }
     }
 }
@@ -355,12 +359,14 @@ impl Default for SearchState {
 #[derive(Debug, Clone)]
 pub struct FormState {
     pub create_form: Option<CreateForm>,
+    pub original_form_values: Option<CreateForm>,
 }
 
 impl Default for FormState {
     fn default() -> Self {
         Self {
             create_form: None,
+            original_form_values: None,
         }
     }
 }
@@ -470,6 +476,8 @@ impl App {
             modals: ModalState {
                 delete_confirmation: None,
                 delete_modal_selection: 0,
+                unsaved_changes_modal: false,
+                unsaved_changes_modal_selection: 0,
             },
             notebooks: NotebookState {
                 current_notebook_id: saved_notebook_id, // Use saved notebook ID if valid, otherwise None
@@ -485,6 +493,7 @@ impl App {
             },
             form: FormState {
                 create_form: None,
+                original_form_values: None,
             },
         };
         
@@ -902,7 +911,6 @@ impl App {
             if self.ui.selected_index > 0 {
                 self.ui.selected_index -= 1;
                 self.sync_list_state();
-                // Auto-select the item when navigating
                 self.select_current_item();
             }
         }
@@ -938,7 +946,6 @@ impl App {
             if self.ui.selected_index < items.len().saturating_sub(1) {
                 self.ui.selected_index += 1;
                 self.sync_list_state();
-                // Auto-select the item when navigating
                 self.select_current_item();
             }
         }
@@ -1486,12 +1493,20 @@ impl App {
         self.search.query.push(ch);
         self.ui.selected_index = 0; // Reset to top when searching
         self.sync_list_state();
+        // Adjust index to skip headings in grouped tag mode
+        self.adjust_selected_index();
+        // Select the item at the adjusted index to match the new filtered results
+        self.select_current_item();
     }
 
     pub fn remove_from_search(&mut self) {
         self.search.query.pop();
         self.ui.selected_index = 0; // Reset to top when searching
         self.sync_list_state();
+        // Adjust index to skip headings in grouped tag mode
+        self.adjust_selected_index();
+        // Select the item at the adjusted index to match the new filtered results
+        self.select_current_item();
     }
 
     pub fn enter_edit_mode(&mut self) {
@@ -1541,6 +1556,8 @@ impl App {
                     })
                 }
             };
+            // Store original form values for change detection
+            self.form.original_form_values = Some(form.clone());
             self.form.create_form = Some(form);
             self.ui.mode = Mode::Create; // Use Create mode for form-based editing
         } else {
@@ -1548,6 +1565,59 @@ impl App {
         }
     }
 
+    pub fn has_unsaved_changes(&self) -> bool {
+        // Only check for changes when editing (not creating new items)
+        let editing_item_id = if let Some(ref form) = self.form.create_form {
+            match form {
+                CreateForm::Task(task_form) => task_form.editing_item_id,
+                CreateForm::Note(note_form) => note_form.editing_item_id,
+                CreateForm::Journal(journal_form) => journal_form.editing_item_id,
+            }
+        } else {
+            return false;
+        };
+
+        // If not editing (creating new item), no changes to track
+        if editing_item_id.is_none() {
+            return false;
+        }
+
+        // If no original values stored, can't compare
+        let original = match &self.form.original_form_values {
+            Some(f) => f,
+            None => return false,
+        };
+
+        let current = match &self.form.create_form {
+            Some(f) => f,
+            None => return false,
+        };
+
+        // Compare forms based on type
+        match (original, current) {
+            (CreateForm::Task(orig), CreateForm::Task(curr)) => {
+                orig.title.to_string().trim() != curr.title.to_string().trim() ||
+                orig.description.to_string().trim() != curr.description.to_string().trim() ||
+                orig.due_date.to_string().trim() != curr.due_date.to_string().trim() ||
+                orig.tags.to_string().trim() != curr.tags.to_string().trim() ||
+                orig.notebook_id != curr.notebook_id
+            }
+            (CreateForm::Note(orig), CreateForm::Note(curr)) => {
+                orig.title.to_string().trim() != curr.title.to_string().trim() ||
+                orig.content.to_string().trim() != curr.content.to_string().trim() ||
+                orig.tags.to_string().trim() != curr.tags.to_string().trim() ||
+                orig.notebook_id != curr.notebook_id
+            }
+            (CreateForm::Journal(orig), CreateForm::Journal(curr)) => {
+                orig.date.to_string().trim() != curr.date.to_string().trim() ||
+                orig.title.to_string().trim() != curr.title.to_string().trim() ||
+                orig.content.to_string().trim() != curr.content.to_string().trim() ||
+                orig.tags.to_string().trim() != curr.tags.to_string().trim() ||
+                orig.notebook_id != curr.notebook_id
+            }
+            _ => false, // Different form types, shouldn't happen
+        }
+    }
 
     pub fn enter_create_mode(&mut self) {
         let notebook_id = self.notebooks.current_notebook_id;
@@ -1610,6 +1680,7 @@ impl App {
 
     pub fn exit_create_mode(&mut self) {
         self.form.create_form = None;
+        self.form.original_form_values = None;
         self.ui.mode = Mode::View;
     }
 
@@ -2494,6 +2565,11 @@ impl App {
 
     /// Switch to a different notebook
     pub fn switch_notebook(&mut self, id: Option<i64>) -> Result<(), DatabaseError> {
+        // Clear selected item immediately to prevent showing items from previous notebook
+        self.ui.selected_item = None;
+        // Reset selection index to start from beginning
+        self.ui.selected_index = 0;
+        
         self.notebooks.current_notebook_id = id;
         // Save to config
         self.config.current_notebook_id = id;
@@ -2503,6 +2579,20 @@ impl App {
         }
         // Reload data to filter by new notebook
         self.load_data()?;
+        
+        // Adjust selection index to ensure it's valid for the new data
+        self.adjust_selected_index();
+        
+        // Auto-select the first item if available (for all tabs)
+        // If no items exist, select_current_item() won't update selected_item,
+        // so we need to clear it to avoid showing items from other notebooks
+        let items = self.get_current_items();
+        if items.is_empty() {
+            self.ui.selected_item = None;
+        } else {
+            self.select_current_item();
+        }
+        
         self.set_status_message(format!("Switched to notebook: {}", self.get_notebook_display_name(id)));
         Ok(())
     }

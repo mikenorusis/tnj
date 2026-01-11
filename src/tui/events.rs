@@ -430,10 +430,68 @@ fn handle_markdown_help_mode(app: &mut App, key_event: KeyEvent) -> Result<bool,
     }
 }
 
+fn handle_unsaved_changes_modal(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError> {
+    match key_event.code {
+        KeyCode::Up => {
+            // Move selection up (wrapping from Discard to Save)
+            if app.modals.unsaved_changes_modal_selection == 0 {
+                app.modals.unsaved_changes_modal_selection = 1; // Wrap to Save
+            } else {
+                app.modals.unsaved_changes_modal_selection -= 1;
+            }
+            return Ok(false);
+        }
+        KeyCode::Down => {
+            // Move selection down (wrapping from Save to Discard)
+            if app.modals.unsaved_changes_modal_selection == 1 {
+                app.modals.unsaved_changes_modal_selection = 0; // Wrap to Discard
+            } else {
+                app.modals.unsaved_changes_modal_selection += 1;
+            }
+            return Ok(false);
+        }
+        KeyCode::Enter => {
+            // Execute selected action
+            if app.modals.unsaved_changes_modal_selection == 0 {
+                // Discard Changes - exit create mode without saving
+                app.modals.unsaved_changes_modal = false;
+                app.exit_create_mode();
+            } else {
+                // Save Changes - save then exit (selection == 1)
+                app.modals.unsaved_changes_modal = false;
+                match app.save_create_form() {
+                    Ok(()) => {
+                        // Success - save_create_form already calls exit_create_mode
+                    }
+                    Err(e) => {
+                        // Save failed - stay in edit mode, show error
+                        app.set_status_message(format!("Failed to save: {}", e));
+                    }
+                }
+            }
+            return Ok(false);
+        }
+        KeyCode::Esc => {
+            // Cancel - close modal, stay in edit mode
+            app.modals.unsaved_changes_modal = false;
+            return Ok(false);
+        }
+        _ => {
+            // Ignore all other keys when confirmation modal is shown
+            return Ok(false);
+        }
+    }
+}
+
 fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError> {
     // Handle delete confirmation modal first (before other modes)
     if app.modals.delete_confirmation.is_some() {
         return handle_delete_confirmation_modal(app, key_event);
+    }
+
+    // Handle unsaved changes modal first (before create mode)
+    if app.modals.unsaved_changes_modal {
+        return handle_unsaved_changes_modal(app, key_event);
     }
 
     // Handle markdown help mode first (before create mode)
@@ -810,6 +868,10 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                                 editor.delete_char();
                                 return Ok(false);
                             }
+                            KeyCode::Delete => {
+                                editor.delete_char_forward();
+                                return Ok(false);
+                            }
                             KeyCode::Left => {
                                 editor.move_cursor_left(extend_selection);
                                 return Ok(false);
@@ -1077,9 +1139,17 @@ fn handle_create_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiErr
             }
         }
         KeyCode::Esc => {
-            // Cancel creation
-            app.exit_create_mode();
-            return Ok(false);
+            // Check for unsaved changes before exiting
+            if app.has_unsaved_changes() {
+                // Show confirmation modal
+                app.modals.unsaved_changes_modal = true;
+                app.modals.unsaved_changes_modal_selection = 0; // Default to "Discard Changes"
+                return Ok(false);
+            } else {
+                // No changes, exit immediately
+                app.exit_create_mode();
+                return Ok(false);
+            }
         }
         _ => {
             // Check for help binding before default handling
@@ -1156,6 +1226,34 @@ fn handle_create_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiErr
         
         match key_event.code {
             KeyCode::Char(c) => {
+                // On macOS, detect escape sequences for word navigation and delete:
+                // \033b (ESC+b) = Ctrl+Left (backward word) 
+                // \033f (ESC+f) = Ctrl+Right (forward word)
+                // \033[3~ (ESC+[3~) = Delete (forward delete) - may be parsed as character '~' with ALT
+                #[cfg(target_os = "macos")]
+                {
+                    // Check if this is an escape sequence for word navigation
+                    // \033b and \033f are sent as ESC followed by 'b' or 'f'
+                    // Crossterm typically parses ESC as ALT modifier, so ESC+b becomes ALT+b
+                    if key_event.modifiers.contains(KeyModifiers::ALT) && c == 'b' {
+                        // ESC+b = backward word (Ctrl+Left)
+                        editor.move_cursor_word_left(extend_selection);
+                        return Ok(false);
+                    }
+                    if key_event.modifiers.contains(KeyModifiers::ALT) && c == 'f' {
+                        // ESC+f = forward word (Ctrl+Right)
+                        editor.move_cursor_word_right(extend_selection);
+                        return Ok(false);
+                    }
+                    // Check for Delete key escape sequence \033[3~
+                    // This may be parsed as ALT+~ or just '~' depending on terminal
+                    if key_event.modifiers.contains(KeyModifiers::ALT) && c == '~' {
+                        // ESC+[3~ = Delete (forward delete)
+                        editor.delete_char_forward();
+                        return Ok(false);
+                    }
+                }
+                
                 // Skip if primary modifier is held (to avoid inserting 'c' or 'x' when copy/cut is intended)
                 if crate::utils::has_primary_modifier(key_event.modifiers) {
                     return Ok(false);
@@ -1167,6 +1265,10 @@ fn handle_create_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiErr
                 editor.delete_char();
                 return Ok(false);
             }
+            KeyCode::Delete => {
+                editor.delete_char_forward();
+                return Ok(false);
+            }
             KeyCode::Up => {
                 editor.move_cursor_up(extend_selection);
                 return Ok(false);
@@ -1176,7 +1278,16 @@ fn handle_create_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiErr
                 return Ok(false);
             }
             KeyCode::Left => {
-                if matches_key_event(key_event, &word_left_binding) {
+                // Check for word navigation binding
+                let mut is_word_nav = matches_key_event(key_event, &word_left_binding);
+                
+                // On macOS, also check for Option+Left (Alt modifier)
+                #[cfg(target_os = "macos")]
+                {
+                    is_word_nav = is_word_nav || key_event.modifiers.contains(KeyModifiers::ALT);
+                }
+                
+                if is_word_nav {
                     editor.move_cursor_word_left(extend_selection);
                 } else {
                     editor.move_cursor_left(extend_selection);
@@ -1184,7 +1295,16 @@ fn handle_create_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiErr
                 return Ok(false);
             }
             KeyCode::Right => {
-                if matches_key_event(key_event, &word_right_binding) {
+                // Check for word navigation binding
+                let mut is_word_nav = matches_key_event(key_event, &word_right_binding);
+                
+                // On macOS, also check for Option+Right (Alt modifier)
+                #[cfg(target_os = "macos")]
+                {
+                    is_word_nav = is_word_nav || key_event.modifiers.contains(KeyModifiers::ALT);
+                }
+                
+                if is_word_nav {
                     editor.move_cursor_word_right(extend_selection);
                 } else {
                     editor.move_cursor_right(extend_selection);
@@ -1460,6 +1580,10 @@ fn handle_notebook_modal_mode(app: &mut App, key_event: KeyEvent) -> Result<bool
                                 editor.delete_char();
                                 return Ok(false);
                             }
+                            KeyCode::Delete => {
+                                editor.delete_char_forward();
+                                return Ok(false);
+                            }
                             KeyCode::Left => {
                                 editor.move_cursor_left(extend_selection);
                                 return Ok(false);
@@ -1502,6 +1626,16 @@ fn handle_search_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiErr
         }
         KeyCode::Backspace => {
             app.remove_from_search();
+            return Ok(false);
+        }
+        KeyCode::Up => {
+            // Allow navigation through search results (without auto-selecting)
+            app.move_selection_up();
+            return Ok(false);
+        }
+        KeyCode::Down => {
+            // Allow navigation through search results (without auto-selecting)
+            app.move_selection_down();
             return Ok(false);
         }
         _ => Ok(false)
@@ -1681,6 +1815,27 @@ fn handle_filter_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiErr
                     
                     match key_event.code {
                         KeyCode::Char(c) => {
+                            // On macOS, detect escape sequences for word navigation and delete:
+                            // \033b (ESC+b) = Ctrl+Left (backward word) 
+                            // \033f (ESC+f) = Ctrl+Right (forward word)
+                            // \033[3~ (ESC+[3~) = Delete (forward delete) - may be parsed as character '~' with ALT
+                            #[cfg(target_os = "macos")]
+                            {
+                                if key_event.modifiers.contains(KeyModifiers::ALT) && c == 'b' {
+                                    editor.move_cursor_word_left(extend_selection);
+                                    return Ok(false);
+                                }
+                                if key_event.modifiers.contains(KeyModifiers::ALT) && c == 'f' {
+                                    editor.move_cursor_word_right(extend_selection);
+                                    return Ok(false);
+                                }
+                                // Check for Delete key escape sequence \033[3~
+                                if key_event.modifiers.contains(KeyModifiers::ALT) && c == '~' {
+                                    editor.delete_char_forward();
+                                    return Ok(false);
+                                }
+                            }
+                            
                             // Skip if primary modifier is held (to avoid inserting 'c' or 'x' when copy/cut is intended)
                             if crate::utils::has_primary_modifier(key_event.modifiers) {
                                 return Ok(false);
@@ -1692,6 +1847,10 @@ fn handle_filter_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiErr
                             editor.delete_char();
                             return Ok(false);
                         }
+                        KeyCode::Delete => {
+                            editor.delete_char_forward();
+                            return Ok(false);
+                        }
                         KeyCode::Up => {
                             editor.move_cursor_up(extend_selection);
                             return Ok(false);
@@ -1701,7 +1860,12 @@ fn handle_filter_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiErr
                             return Ok(false);
                         }
                         KeyCode::Left => {
-                            if matches_key_event(key_event, &word_left_binding) {
+                            let mut is_word_nav = matches_key_event(key_event, &word_left_binding);
+                            #[cfg(target_os = "macos")]
+                            {
+                                is_word_nav = is_word_nav || key_event.modifiers.contains(KeyModifiers::ALT);
+                            }
+                            if is_word_nav {
                                 editor.move_cursor_word_left(extend_selection);
                             } else {
                                 editor.move_cursor_left(extend_selection);
@@ -1709,7 +1873,12 @@ fn handle_filter_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiErr
                             return Ok(false);
                         }
                         KeyCode::Right => {
-                            if matches_key_event(key_event, &word_right_binding) {
+                            let mut is_word_nav = matches_key_event(key_event, &word_right_binding);
+                            #[cfg(target_os = "macos")]
+                            {
+                                is_word_nav = is_word_nav || key_event.modifiers.contains(KeyModifiers::ALT);
+                            }
+                            if is_word_nav {
                                 editor.move_cursor_word_right(extend_selection);
                             } else {
                                 editor.move_cursor_right(extend_selection);
