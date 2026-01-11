@@ -2576,6 +2576,11 @@ impl App {
 
     /// Switch to a different notebook
     pub fn switch_notebook(&mut self, id: Option<i64>) -> Result<(), DatabaseError> {
+        // Clear selected item immediately to prevent showing items from previous notebook
+        self.ui.selected_item = None;
+        // Reset selection index to start from beginning
+        self.ui.selected_index = 0;
+        
         self.notebooks.current_notebook_id = id;
         // Save to config
         self.config.current_notebook_id = id;
@@ -2585,6 +2590,20 @@ impl App {
         }
         // Reload data to filter by new notebook
         self.load_data()?;
+        
+        // Adjust selection index to ensure it's valid for the new data
+        self.adjust_selected_index();
+        
+        // Auto-select the first item if available (for all tabs)
+        // If no items exist, select_current_item() won't update selected_item,
+        // so we need to clear it to avoid showing items from other notebooks
+        let items = self.get_current_items();
+        if items.is_empty() {
+            self.ui.selected_item = None;
+        } else {
+            self.select_current_item();
+        }
+        
         self.set_status_message(format!("Switched to notebook: {}", self.get_notebook_display_name(id)));
         Ok(())
     }
