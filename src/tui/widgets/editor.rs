@@ -165,6 +165,61 @@ impl Editor {
         }
     }
 
+    pub fn delete_char_forward(&mut self) {
+        // If there's a selection, delete it instead
+        if self.has_selection() {
+            self.delete_selection();
+            return;
+        }
+        
+        self.ensure_cursor_valid();
+        let line = self.lines.get(self.cursor_line)
+            .expect("cursor_line should be valid after ensure_cursor_valid");
+        let line_len = line.chars().count();
+        let col = cmp::min(self.cursor_col, line_len);
+        
+        let op = if col < line_len {
+            // Delete character after cursor
+            let chars: Vec<char> = line.chars().collect();
+            let ch = chars[col];
+            Some(EditOperation::DeleteChar {
+                line: self.cursor_line,
+                col,
+                ch,
+            })
+        } else if self.cursor_line < self.lines.len().saturating_sub(1) {
+            // Merge with next line
+            let next_line = self.lines.get(self.cursor_line + 1)
+                .cloned()
+                .unwrap_or_default();
+            Some(EditOperation::DeleteNewline {
+                line: self.cursor_line,
+                col,
+                next_line,
+            })
+        } else {
+            None
+        };
+        
+        if let Some(op) = op {
+            // Perform the deletion
+            if col < line_len {
+                let line = self.lines.get_mut(self.cursor_line)
+                    .expect("cursor_line should be valid after ensure_cursor_valid");
+                let mut chars: Vec<char> = line.chars().collect();
+                chars.remove(col);
+                *line = chars.into_iter().collect();
+            } else if self.cursor_line < self.lines.len().saturating_sub(1) {
+                let next_line = self.lines.remove(self.cursor_line + 1);
+                let line = self.lines.get_mut(self.cursor_line)
+                    .expect("cursor_line should be valid");
+                line.push_str(&next_line);
+            }
+            
+            self.add_to_undo(op);
+        }
+    }
+
     pub fn insert_newline(&mut self) {
         // Clear selection if inserting
         if self.has_selection() {
@@ -546,6 +601,11 @@ impl Editor {
             pos -= 1;
         }
 
+        // Skip punctuation to the left (so we can jump past punctuation to the next word)
+        while pos > 0 && !chars[pos - 1].is_whitespace() && !is_word_char(chars[pos - 1]) {
+            pos -= 1;
+        }
+
         self.cursor_col = pos;
     }
 
@@ -587,6 +647,11 @@ impl Editor {
 
         // Skip word characters to the right
         while pos < chars.len() && is_word_char(chars[pos]) {
+            pos += 1;
+        }
+
+        // Skip punctuation to the right (so we can jump past punctuation to the next word)
+        while pos < chars.len() && !chars[pos].is_whitespace() && !is_word_char(chars[pos]) {
             pos += 1;
         }
 
