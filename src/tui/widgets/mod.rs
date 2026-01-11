@@ -16,4 +16,5 @@ pub mod tags;
 pub mod filters_box;
 pub mod filter_modal;
 pub mod notebook_modal;
+pub mod unsaved_changes_modal;
 

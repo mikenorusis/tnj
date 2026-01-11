@@ -173,6 +173,12 @@ pub fn render(f: &mut Frame, app: &mut App, layout: &Layout) {
         render_confirm_delete(f, f.area(), item, app.modals.delete_modal_selection, &app.config);
     }
 
+    // Render unsaved changes modal if pending (after normal content)
+    if app.modals.unsaved_changes_modal {
+        use crate::tui::widgets::unsaved_changes_modal::render_unsaved_changes;
+        render_unsaved_changes(f, f.area(), app.modals.unsaved_changes_modal_selection, &app.config);
+    }
+
     // Render filters box
     let filter_summary = app.get_filter_summary();
     render_filters_box(f, layout.filters_area, &filter_summary, &app.config);

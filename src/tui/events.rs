@@ -430,10 +430,68 @@ fn handle_markdown_help_mode(app: &mut App, key_event: KeyEvent) -> Result<bool,
     }
 }
 
+fn handle_unsaved_changes_modal(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError> {
+    match key_event.code {
+        KeyCode::Up => {
+            // Move selection up (wrapping from Discard to Save)
+            if app.modals.unsaved_changes_modal_selection == 0 {
+                app.modals.unsaved_changes_modal_selection = 1; // Wrap to Save
+            } else {
+                app.modals.unsaved_changes_modal_selection -= 1;
+            }
+            return Ok(false);
+        }
+        KeyCode::Down => {
+            // Move selection down (wrapping from Save to Discard)
+            if app.modals.unsaved_changes_modal_selection == 1 {
+                app.modals.unsaved_changes_modal_selection = 0; // Wrap to Discard
+            } else {
+                app.modals.unsaved_changes_modal_selection += 1;
+            }
+            return Ok(false);
+        }
+        KeyCode::Enter => {
+            // Execute selected action
+            if app.modals.unsaved_changes_modal_selection == 0 {
+                // Discard Changes - exit create mode without saving
+                app.modals.unsaved_changes_modal = false;
+                app.exit_create_mode();
+            } else {
+                // Save Changes - save then exit (selection == 1)
+                app.modals.unsaved_changes_modal = false;
+                match app.save_create_form() {
+                    Ok(()) => {
+                        // Success - save_create_form already calls exit_create_mode
+                    }
+                    Err(e) => {
+                        // Save failed - stay in edit mode, show error
+                        app.set_status_message(format!("Failed to save: {}", e));
+                    }
+                }
+            }
+            return Ok(false);
+        }
+        KeyCode::Esc => {
+            // Cancel - close modal, stay in edit mode
+            app.modals.unsaved_changes_modal = false;
+            return Ok(false);
+        }
+        _ => {
+            // Ignore all other keys when confirmation modal is shown
+            return Ok(false);
+        }
+    }
+}
+
 fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError> {
     // Handle delete confirmation modal first (before other modes)
     if app.modals.delete_confirmation.is_some() {
         return handle_delete_confirmation_modal(app, key_event);
+    }
+
+    // Handle unsaved changes modal first (before create mode)
+    if app.modals.unsaved_changes_modal {
+        return handle_unsaved_changes_modal(app, key_event);
     }
 
     // Handle markdown help mode first (before create mode)
@@ -1081,9 +1139,17 @@ fn handle_create_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiErr
             }
         }
         KeyCode::Esc => {
-            // Cancel creation
-            app.exit_create_mode();
-            return Ok(false);
+            // Check for unsaved changes before exiting
+            if app.has_unsaved_changes() {
+                // Show confirmation modal
+                app.modals.unsaved_changes_modal = true;
+                app.modals.unsaved_changes_modal_selection = 0; // Default to "Discard Changes"
+                return Ok(false);
+            } else {
+                // No changes, exit immediately
+                app.exit_create_mode();
+                return Ok(false);
+            }
         }
         _ => {
             // Check for help binding before default handling
