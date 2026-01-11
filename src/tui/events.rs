@@ -1504,6 +1504,16 @@ fn handle_search_mode(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiErr
             app.remove_from_search();
             return Ok(false);
         }
+        KeyCode::Up => {
+            // Allow navigation through search results (without auto-selecting)
+            app.move_selection_up();
+            return Ok(false);
+        }
+        KeyCode::Down => {
+            // Allow navigation through search results (without auto-selecting)
+            app.move_selection_down();
+            return Ok(false);
+        }
         _ => Ok(false)
     }
 }

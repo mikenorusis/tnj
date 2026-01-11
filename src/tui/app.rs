@@ -892,7 +892,10 @@ impl App {
                 if !is_heading[new_index] {
                     self.ui.selected_index = new_index;
                     self.sync_list_state();
-                    self.select_current_item();
+                    // Only auto-select when not in search mode
+                    if self.ui.mode != Mode::Search {
+                        self.select_current_item();
+                    }
                     return;
                 }
             }
@@ -902,8 +905,10 @@ impl App {
             if self.ui.selected_index > 0 {
                 self.ui.selected_index -= 1;
                 self.sync_list_state();
-                // Auto-select the item when navigating
-                self.select_current_item();
+                // Only auto-select when not in search mode
+                if self.ui.mode != Mode::Search {
+                    self.select_current_item();
+                }
             }
         }
     }
@@ -923,7 +928,10 @@ impl App {
                 if !is_heading[new_index] {
                     self.ui.selected_index = new_index;
                     self.sync_list_state();
-                    self.select_current_item();
+                    // Only auto-select when not in search mode
+                    if self.ui.mode != Mode::Search {
+                        self.select_current_item();
+                    }
                     return;
                 }
             }
@@ -931,15 +939,20 @@ impl App {
             if self.ui.selected_index < display_len.saturating_sub(1) {
                 self.ui.selected_index = display_len.saturating_sub(1);
                 self.sync_list_state();
-                self.select_current_item();
+                // Only auto-select when not in search mode
+                if self.ui.mode != Mode::Search {
+                    self.select_current_item();
+                }
             }
         } else {
             let items = self.get_current_items();
             if self.ui.selected_index < items.len().saturating_sub(1) {
                 self.ui.selected_index += 1;
                 self.sync_list_state();
-                // Auto-select the item when navigating
-                self.select_current_item();
+                // Only auto-select when not in search mode
+                if self.ui.mode != Mode::Search {
+                    self.select_current_item();
+                }
             }
         }
     }
@@ -1486,12 +1499,16 @@ impl App {
         self.search.query.push(ch);
         self.ui.selected_index = 0; // Reset to top when searching
         self.sync_list_state();
+        // Adjust index to skip headings in grouped tag mode
+        self.adjust_selected_index();
     }
 
     pub fn remove_from_search(&mut self) {
         self.search.query.pop();
         self.ui.selected_index = 0; // Reset to top when searching
         self.sync_list_state();
+        // Adjust index to skip headings in grouped tag mode
+        self.adjust_selected_index();
     }
 
     pub fn enter_edit_mode(&mut self) {
