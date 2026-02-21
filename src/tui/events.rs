@@ -786,6 +786,8 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                                 app.move_settings_sidebar_width_up();
                             } else if cat == "Display Settings" {
                                 app.move_settings_display_mode_up();
+                            } else if cat == "Content Settings" {
+                                app.move_settings_content_display_up();
                             }
                         }
                         return Ok(false);
@@ -797,6 +799,8 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) -> Result<bool, TuiError
                                 app.move_settings_sidebar_width_down();
                             } else if cat == "Display Settings" {
                                 app.move_settings_display_mode_down();
+                            } else if cat == "Content Settings" {
+                                app.move_settings_content_display_down();
                             }
                         }
                         return Ok(false);
@@ -2107,6 +2111,8 @@ fn handle_global_key_bindings(app: &mut App, key_event: KeyEvent) -> Result<bool
                     app.move_settings_sidebar_width_down();
                 } else if category == "Display Settings" {
                     app.move_settings_display_mode_down();
+                } else if category == "Content Settings" {
+                    app.move_settings_content_display_down();
                 }
             }
         } else {
@@ -2128,6 +2134,8 @@ fn handle_global_key_bindings(app: &mut App, key_event: KeyEvent) -> Result<bool
                     app.move_settings_sidebar_width_up();
                 } else if category == "Display Settings" {
                     app.move_settings_display_mode_up();
+                } else if category == "Content Settings" {
+                    app.move_settings_content_display_up();
                 }
             }
         } else {
@@ -2203,6 +2211,10 @@ fn handle_global_key_bindings(app: &mut App, key_event: KeyEvent) -> Result<bool
                     } else if category == "Display Settings" {
                         if let Err(e) = app.apply_display_mode() {
                             app.set_status_message(format!("Failed to change display mode: {}", e));
+                        }
+                    } else if category == "Content Settings" {
+                        if let Err(e) = app.apply_content_display() {
+                            app.set_status_message(format!("Failed to change content display: {}", e));
                         }
                     }
                 }

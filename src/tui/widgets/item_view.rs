@@ -89,31 +89,38 @@ pub fn render_item_view(f: &mut Frame, area: Rect, item: &SelectedItem, config: 
 
     let viewport_height = (area.height - 2) as usize; // Account for borders
     
-    // Get content as markdown string
+    // Get content string (same for both Markdown and Text)
     let content_string = get_content_string(item);
     
-    // Calculate text width (content area width minus borders)
-    let text_width = (content_area.width.saturating_sub(2)) as usize;
-    
-    // Parse markdown with ratskin (requires width for wrapping)
-    // Convert String to minimad::Text and usize to u16 for parse()
-    let content_text_input = MinimadText::from(content_string.as_str());
-    let text_width_u16: u16 = text_width.try_into().unwrap_or(u16::MAX);
-    let content_lines = RatSkin::default().parse(content_text_input, text_width_u16);
-    
-    // Convert ratskin lines to ratatui lines, preserving styling from spans
-    // With ratskin 0.3.0 and ratatui 0.30.0, types should be compatible
-    let ratatui_lines: Vec<Line> = content_lines.into_iter().map(|line| {
-        // Convert each span, preserving its style and content
-        let spans: Vec<Span> = line.spans.into_iter().map(|span| {
-            Span::styled(
-                span.content.to_string(),
-                span.style
-            )
+    let content_text = if config.display_content_as_markdown() {
+        // Parse markdown with ratskin (requires width for wrapping)
+        let text_width = (content_area.width.saturating_sub(2)) as usize;
+        let text_width_u16: u16 = text_width.try_into().unwrap_or(u16::MAX);
+        let content_text_input = MinimadText::from(content_string.as_str());
+        let content_lines = RatSkin::default().parse(content_text_input, text_width_u16);
+        let ratatui_lines: Vec<Line> = content_lines.into_iter().map(|line| {
+            let spans: Vec<Span> = line.spans.into_iter().map(|span| {
+                Span::styled(
+                    span.content.to_string(),
+                    span.style
+                )
+            }).collect();
+            Line::from(spans)
         }).collect();
-        Line::from(spans)
-    }).collect();
-    let content_text = Text::from(ratatui_lines);
+        Text::from(ratatui_lines)
+    } else {
+        // Plain text: one line per newline, no markdown parsing
+        let lines: Vec<Line> = content_string
+            .lines()
+            .map(|s| Line::from(Span::raw(s.to_string())))
+            .collect();
+        let lines = if lines.is_empty() {
+            vec![Line::from(Span::raw(""))]
+        } else {
+            lines
+        };
+        Text::from(lines)
+    };
     
     // Calculate total lines (before wrapping)
     let total_lines = content_text.lines.len();

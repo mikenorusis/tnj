@@ -29,6 +29,8 @@ pub struct Config {
     pub color_overrides: Option<Theme>,
     #[serde(default = "default_current_notebook_id")]
     pub current_notebook_id: Option<i64>,
+    #[serde(default = "default_display_content_as")]
+    pub display_content_as: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,6 +124,7 @@ impl Default for Config {
             config_version: Some(CURRENT_CONFIG_VERSION),
             color_overrides: None,
             current_notebook_id: default_current_notebook_id(),
+            display_content_as: default_display_content_as(),
         }
     }
 }
@@ -369,6 +372,10 @@ fn default_current_notebook_id() -> Option<i64> {
     None
 }
 
+fn default_display_content_as() -> String {
+    "markdown".to_string()
+}
+
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("Failed to read config directory: {0}")]
@@ -481,6 +488,11 @@ impl Config {
     /// Get the expanded database path (with ~ expansion)
     pub fn get_database_path(&self) -> PathBuf {
         utils::expand_path(&self.database_path)
+    }
+
+    /// Whether content should be rendered as markdown (vs plain text)
+    pub fn display_content_as_markdown(&self) -> bool {
+        self.display_content_as.as_str() == "markdown"
     }
 
     /// Get the currently active theme
