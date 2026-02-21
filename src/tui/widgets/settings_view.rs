@@ -150,6 +150,9 @@ pub fn render_settings_view_modal(f: &mut Frame, area: Rect, app: &App) {
         Some(category) if category == "Display Settings" => {
             render_display_settings(f, main_area, app, fg_color, bg_color, highlight_fg, highlight_bg);
         }
+        Some(category) if category == "Content Settings" => {
+            render_content_settings(f, main_area, app, fg_color, bg_color, highlight_fg, highlight_bg);
+        }
         Some(category) if category == "System Settings" => {
             render_system_settings(f, main_area, app, fg_color, bg_color);
         }
@@ -327,6 +330,49 @@ fn render_display_settings(
     let mut list_state = ListState::default();
     list_state.select(Some(app.settings.display_mode_index));
     StatefulWidget::render(list, mode_area, f.buffer_mut(), &mut list_state);
+}
+
+/// Render content settings (Display Content As)
+fn render_content_settings(
+    f: &mut Frame,
+    main_area: Rect,
+    app: &App,
+    fg_color: ratatui::style::Color,
+    bg_color: ratatui::style::Color,
+    highlight_fg: ratatui::style::Color,
+    highlight_bg: ratatui::style::Color,
+) {
+    let options = app.get_content_display_options();
+    let current_str = if app.config.display_content_as_markdown() { "Markdown" } else { "Text" };
+    
+    let box_height = (options.len() + 2).max(5).min(main_area.height as usize) as u16;
+    let areas = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(box_height),
+            Constraint::Min(0),
+        ])
+        .split(main_area);
+    
+    let items: Vec<ListItem> = options.iter().map(|&mode| {
+        let is_selected = mode == current_str;
+        let radio = if is_selected { "●" } else { "○" };
+        let text = format!("{} {}", radio, mode);
+        ListItem::new(text)
+    }).collect();
+    
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title("Display Content As"))
+        .style(Style::default().fg(fg_color).bg(bg_color))
+        .highlight_style(
+            Style::default()
+                .fg(highlight_fg)
+                .bg(highlight_bg)
+        );
+    
+    let mut list_state = ListState::default();
+    list_state.select(Some(app.settings.content_display_index));
+    StatefulWidget::render(list, areas[0], f.buffer_mut(), &mut list_state);
 }
 
 /// Render system settings content

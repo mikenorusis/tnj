@@ -258,6 +258,7 @@ pub struct SettingsState {
     pub theme_list_state: ListState,
     pub sidebar_width_index: usize,
     pub display_mode_index: usize,
+    pub content_display_index: usize,
     // Color editor state
     pub color_field_index: usize,
     pub color_cycle_indices: [usize; 5],
@@ -280,6 +281,7 @@ impl Default for SettingsState {
             theme_list_state: ListState::default(),
             sidebar_width_index: 0,
             display_mode_index: 0,
+            content_display_index: 0,
             color_field_index: 0,
             color_cycle_indices: [0; 5],
             color_input_mode: false,
@@ -464,6 +466,7 @@ impl App {
                 theme_list_state: ListState::default(),
                 sidebar_width_index: 0,
                 display_mode_index: 0,
+                content_display_index: 0,
                 color_field_index: 0,
                 color_cycle_indices: [0; 5],
                 color_input_mode: false,
@@ -1485,6 +1488,38 @@ impl App {
         Ok(())
     }
 
+    /// Get content display options (Display Content As)
+    pub fn get_content_display_options(&self) -> Vec<&'static str> {
+        vec!["Markdown", "Text"]
+    }
+
+    /// Move content display selection up
+    pub fn move_settings_content_display_up(&mut self) {
+        if self.settings.content_display_index > 0 {
+            self.settings.content_display_index -= 1;
+        }
+    }
+
+    /// Move content display selection down
+    pub fn move_settings_content_display_down(&mut self) {
+        let options = self.get_content_display_options();
+        if self.settings.content_display_index < options.len().saturating_sub(1) {
+            self.settings.content_display_index += 1;
+        }
+    }
+
+    /// Apply selected content display mode
+    pub fn apply_content_display(&mut self) -> Result<(), crate::config::ConfigError> {
+        let options = self.get_content_display_options();
+        if let Some(&mode_str) = options.get(self.settings.content_display_index) {
+            let value = mode_str.to_lowercase();
+            self.config.display_content_as = value.clone();
+            self.save_config()?;
+            self.set_status_message(format!("Display content as: {}", mode_str));
+        }
+        Ok(())
+    }
+
     pub fn exit_settings_mode(&mut self) {
         self.ui.mode = Mode::View;
     }
@@ -2212,7 +2247,7 @@ impl App {
 
     /// Get settings categories
     pub fn get_settings_categories(&self) -> Vec<String> {
-        vec!["Theme Settings".to_string(), "Appearance Settings".to_string(), "Display Settings".to_string(), "System Settings".to_string()]
+        vec!["Theme Settings".to_string(), "Appearance Settings".to_string(), "Display Settings".to_string(), "Content Settings".to_string(), "System Settings".to_string()]
     }
     
     /// Get config file path
@@ -2505,6 +2540,15 @@ impl App {
             self.settings.display_mode_index = index;
         } else {
             self.settings.display_mode_index = 0;
+        }
+        
+        // Initialize content display index to current value
+        let content_options = self.get_content_display_options();
+        let current_content = self.config.display_content_as.as_str();
+        if let Some(index) = content_options.iter().position(|&s| s.eq_ignore_ascii_case(current_content)) {
+            self.settings.content_display_index = index;
+        } else {
+            self.settings.content_display_index = 0;
         }
     }
 
